@@ -46,17 +46,28 @@ les asigna barrio y comuna con los polígonos oficiales de BA Data, balancea por
 
 | Fuente | Uso | Licencia |
 |---|---|---|
-| OpenStreetMap (Overpass) | nombres y topología de calles → esquinas | ODbL — © OpenStreetMap contributors |
+| OpenStreetMap (Overpass) | nombres y topología de calles → esquinas y avenidas | ODbL — © OpenStreetMap contributors |
 | BA Data: barrios y comunas | polígonos oficiales, asignación y overlays | CC BY 4.0 (GCBA) |
+| IGN (WFS `ign:departamento`) | polígonos de los 24 partidos del GBA | CC BY 4.0 (IGN Argentina) |
 | BA Data: callejero oficial | (reservado para el modo avenidas: jerarquía vial) | CC BY 4.0 (GCBA) |
 | OpenFreeMap | teselas vectoriales del mapa base | libre, sin API key |
 | Esri World Imagery | vista satelital opcional | requiere atribución; revisar términos antes de publicar |
 
+## Modos y zonas
+
+- **Zonas**: CABA + GBA **Norte** (8 partidos), **Oeste** (7) y **Sur** (9) — los 24 partidos del conurbano,
+  con overlay de límites de partidos (polígonos IGN) y partida por partidos. Se cambia desde el menú
+  o por URL (`?z=norte`).
+- **Modo Avenidas** (`?j=av`): se marca una avenida en el mapa y hay que reconocerla entre 4 opciones.
+  90 avenidas principales de CABA rankeadas por longitud; la ficha cuenta qué barrios recorre.
+  Las opciones son determinísticas por avenida → los links compartidos son desafíos idénticos.
+- **Archivo**: calendario para jugar cualquier mapa del día pasado (desde el 1/1/2026).
+
 ## Roadmap
 
 - [x] **Fase 1** — modo clásico CABA + overlays didácticos de comunas/barrios + ficha educativa
-- [ ] **Fase 2** — GBA (zona norte/oeste/sur, partidos del AMBA vía OSM), archivo de mapas del día, modo avenidas (callejero oficial: `red_jerarq`)
-- [ ] **Fase 3** — desafío A→B en transporte público (GTFS AMBA precomputado offline), quiz de comunas ("¿qué comuna es este polígono?")
+- [x] **Fase 2** — GBA norte/oeste/sur (24 partidos, esquinas OSM + polígonos IGN), archivo de mapas del día, modo Avenidas
+- [ ] **Fase 3** — desafío A→B en transporte público (GTFS AMBA precomputado offline), quiz de comunas ("¿qué comuna es este polígono?"), localidades del GBA en la ficha didáctica
 
 ## Estructura
 

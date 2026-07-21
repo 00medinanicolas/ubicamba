@@ -1,25 +1,58 @@
-// Genera el dataset de esquinas de CABA desde OpenStreetMap (Overpass) y
-// asigna barrio/comuna con los polígonos oficiales de BA Data.
+// Pipeline de datos de UbicAMBA.
 //
-// Salidas:
-//   src/data/esquinas.json  — [{s1, s2, lat, lng, b}] pre-mezclado (seed fija)
-//   src/data/barrios.json   — [{id, nombre, comuna}]
+// Genera, para cada zona (CABA + GBA norte/oeste/sur):
+//   public/data/zona-<id>.json  — { nombre, esquinas: [{s1,s2,lat,lng,b}], areas: [{id,nombre,grupo?}] }
+//   public/geo/*                — límites simplificados + puntos de etiqueta para overlays
+// y además:
+//   public/data/avenidas.json   — avenidas principales de CABA para el modo Avenidas
+//
+// Fuentes: calles de OpenStreetMap (Overpass, cacheado en data-src/osm-<zona>.json),
+// barrios/comunas oficiales de BA Data, partidos del IGN (WFS, cacheado).
 //
 // Uso: node scripts/build-dataset.mjs
-// La respuesta cruda de Overpass se cachea en data-src/osm-calles.json.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CACHE = join(ROOT, 'data-src', 'osm-calles.json');
-const SEED = 20260721;
-const TARGET_TOTAL = 4800;
-const CAP_POR_BARRIO = 150;
-const CLUSTER_M = 120; // nodos de la misma dupla de calles a menos de esto = una sola esquina
+const DATA_SRC = join(ROOT, 'data-src');
+const OUT_DATA = join(ROOT, 'public', 'data');
+const OUT_GEO = join(ROOT, 'public', 'geo');
+mkdirSync(OUT_DATA, { recursive: true });
+mkdirSync(OUT_GEO, { recursive: true });
 
-// ---------- barrios canónicos (id estable, nombre con acentos, comuna) ----------
+const SEED = 20260721;
+const CLUSTER_M = 120;
+
+// ---------- zonas ----------
+// bbox: [latMin, lngMin, latMax, lngMax] con margen; el recorte fino lo hace el PiP.
+const ZONAS = [
+  { id: 'caba', nombre: 'CABA', bbox: [-34.712, -58.54, -34.52, -58.32], cap: 150, partidos: null },
+  {
+    id: 'norte',
+    nombre: 'Zona Norte',
+    bbox: [-34.63, -58.88, -34.35, -58.44],
+    cap: 140,
+    partidos: ['General San Martín', 'José C. Paz', 'Malvinas Argentinas', 'San Fernando', 'San Isidro', 'San Miguel', 'Tigre', 'Vicente López'],
+  },
+  {
+    id: 'oeste',
+    nombre: 'Zona Oeste',
+    bbox: [-34.96, -58.95, -34.55, -58.48],
+    cap: 140,
+    partidos: ['Hurlingham', 'Ituzaingó', 'La Matanza', 'Merlo', 'Moreno', 'Morón', 'Tres de Febrero'],
+  },
+  {
+    id: 'sur',
+    nombre: 'Zona Sur',
+    bbox: [-34.96, -58.68, -34.6, -58.05],
+    cap: 140,
+    partidos: ['Almirante Brown', 'Avellaneda', 'Berazategui', 'Esteban Echeverría', 'Ezeiza', 'Florencio Varela', 'Lanús', 'Lomas de Zamora', 'Quilmes'],
+  },
+];
+
+// ---------- barrios canónicos de CABA ----------
 const BARRIOS = [
   ['Constitución', 1], ['Monserrat', 1], ['Puerto Madero', 1], ['Retiro', 1], ['San Nicolás', 1], ['San Telmo', 1],
   ['Recoleta', 2],
@@ -36,16 +69,15 @@ const BARRIOS = [
   ['Belgrano', 13], ['Colegiales', 13], ['Núñez', 13],
   ['Palermo', 14],
   ['Agronomía', 15], ['Chacarita', 15], ['La Paternal', 15], ['Parque Chas', 15], ['Villa Crespo', 15], ['Villa Ortúzar', 15],
-].map(([nombre, comuna], i) => ({ id: i + 1, nombre, comuna }));
+].map(([nombre, comuna], i) => ({ id: i + 1, nombre, grupo: comuna }));
 
 const normalizar = (s) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/\./g, '').replace(/\bgral\b/g, 'general').replace(/\s+/g, ' ').trim();
 const BARRIO_POR_CLAVE = new Map(BARRIOS.map((b) => [normalizar(b.nombre), b]));
-// alias del dataset oficial
 BARRIO_POR_CLAVE.set('paternal', BARRIO_POR_CLAVE.get('la paternal'));
 
-// ---------- PRNG con semilla (reproducible) ----------
+// ---------- utilidades ----------
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -62,16 +94,12 @@ function shuffle(arr, rnd) {
   }
   return arr;
 }
-
-// ---------- distancia ----------
 const rad = (d) => (d * Math.PI) / 180;
 function metros(lat1, lng1, lat2, lng2) {
   const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(a));
 }
-
-// ---------- point-in-polygon (ray casting) ----------
 function dentroDeAnillo(lng, lat, ring) {
   let dentro = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -87,165 +115,16 @@ function dentroDePoligono(lng, lat, geom) {
   }
   return false;
 }
-
-// ---------- 1. datos OSM (con caché) ----------
-async function datosOSM() {
-  if (existsSync(CACHE)) {
-    console.log('Usando caché', CACHE);
-    return JSON.parse(readFileSync(CACHE, 'utf8'));
-  }
-  // bbox de CABA con un margen chico; el recorte fino lo hace el PiP con barrios oficiales
-  const query = `[out:json][timeout:240][bbox:-34.712,-58.54,-34.52,-58.32];
-way["highway"~"^(primary|secondary|tertiary|residential|living_street|unclassified|pedestrian)$"]["name"];
-out body;
->;
-out skel qt;`;
-  const endpoints = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-    'https://overpass.private.coffee/api/interpreter',
-    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-  ];
-  for (let intento = 0; intento < 2; intento++) {
-    for (const url of endpoints) {
-      try {
-        console.log('Consultando Overpass:', url);
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'User-Agent': 'ubicamba-dataset/1.0 (juego educativo; contacto: 00medina.nicolas@gmail.com)',
-            Accept: 'application/json',
-          },
-          body: 'data=' + encodeURIComponent(query),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const json = await res.json();
-        if (!json.elements?.length) throw new Error('respuesta vacía' + (json.remark ? ` (${json.remark})` : ''));
-        writeFileSync(CACHE, JSON.stringify(json));
-        return json;
-      } catch (e) {
-        console.warn('  falló:', e.message);
-      }
-    }
-    console.log('Reintentando en 20 s...');
-    await new Promise((r) => setTimeout(r, 20000));
-  }
-  throw new Error('No se pudo descargar de Overpass');
-}
-
-const osm = await datosOSM();
-const nodos = new Map(); // id -> [lng, lat]
-const vias = [];
-for (const el of osm.elements) {
-  if (el.type === 'node') nodos.set(el.id, [el.lon, el.lat]);
-  else if (el.type === 'way' && el.tags?.name) vias.push(el);
-}
-console.log(`OSM: ${vias.length} vías con nombre, ${nodos.size} nodos`);
-
-// ---------- 2. nodos compartidos por >=2 nombres distintos ----------
-const porNodo = new Map(); // nodeId -> Set(nombres)
-for (const via of vias) {
-  const nombre = via.tags.name.trim();
-  if (/sin nombre/i.test(nombre)) continue;
-  for (const ref of via.nodes) {
-    let set = porNodo.get(ref);
-    if (!set) porNodo.set(ref, (set = new Set()));
-    set.add(nombre);
-  }
-}
-const candidatos = [];
-for (const [id, nombres] of porNodo) {
-  if (nombres.size < 2) continue;
-  const coord = nodos.get(id);
-  if (coord) candidatos.push({ coord, nombres: [...nombres] });
-}
-console.log('Nodos-esquina candidatos:', candidatos.length);
-
-// ---------- 3. una esquina por dupla de calles (centroide de nodos cercanos) ----------
-// Una avenida con carriles separados cruza una calle en 2+ nodos: los agrupamos.
-const porDupla = new Map(); // "a||b" -> [{lng,lat}...] en clusters
-for (const { coord, nombres } of candidatos) {
-  const orden = [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
-  for (let i = 0; i < orden.length; i++) {
-    for (let j = i + 1; j < orden.length; j++) {
-      const clave = orden[i] + '||' + orden[j];
-      let clusters = porDupla.get(clave);
-      if (!clusters) porDupla.set(clave, (clusters = []));
-      const cercano = clusters.find((c) =>
-        metros(c.lat / c.n, c.lng / c.n, coord[1], coord[0]) < CLUSTER_M
-      );
-      if (cercano) { cercano.lng += coord[0]; cercano.lat += coord[1]; cercano.n++; }
-      else clusters.push({ lng: coord[0], lat: coord[1], n: 1 });
-    }
-  }
-}
-const esquinasCrudas = [];
-for (const [clave, clusters] of porDupla) {
-  const [s1, s2] = clave.split('||');
-  for (const c of clusters) {
-    esquinasCrudas.push({ s1, s2, lat: c.lat / c.n, lng: c.lng / c.n });
-  }
-}
-console.log('Esquinas únicas (por dupla+ubicación):', esquinasCrudas.length);
-
-// ---------- 4. asignar barrio y comuna con polígonos oficiales ----------
-const barriosFC = JSON.parse(readFileSync(join(ROOT, 'data-src', 'barrios.geojson'), 'utf8'));
-const poligonos = [];
-for (const f of barriosFC.features) {
-  const b = BARRIO_POR_CLAVE.get(normalizar(f.properties.nombre));
-  if (!b) { console.warn('Barrio oficial sin match:', f.properties.nombre); continue; }
-  // bbox para descartar rápido
+function bboxDeGeom(geom) {
   let minX = 180, minY = 90, maxX = -180, maxY = -90;
-  const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
   for (const rings of polys) for (const [x, y] of rings[0]) {
     if (x < minX) minX = x; if (x > maxX) maxX = x;
     if (y < minY) minY = y; if (y > maxY) maxY = y;
   }
-  poligonos.push({ b, geom: f.geometry, minX, minY, maxX, maxY });
+  return { minX, minY, maxX, maxY };
 }
-if (poligonos.length !== 48) console.warn('OJO: se esperaban 48 barrios, hay', poligonos.length);
-
-let fuera = 0;
-const esquinas = [];
-for (const e of esquinasCrudas) {
-  const p = poligonos.find(
-    (p) => e.lng >= p.minX && e.lng <= p.maxX && e.lat >= p.minY && e.lat <= p.maxY &&
-      dentroDePoligono(e.lng, e.lat, p.geom)
-  );
-  if (!p) { fuera++; continue; }
-  esquinas.push({ s1: e.s1, s2: e.s2, lat: +e.lat.toFixed(7), lng: +e.lng.toFixed(7), b: p.b.id });
-}
-console.log(`Con barrio asignado: ${esquinas.length} (descartadas fuera de CABA: ${fuera})`);
-
-// ---------- 5. balancear por barrio y mezclar con semilla ----------
-const rnd = mulberry32(SEED);
-const porBarrio = new Map();
-for (const e of esquinas) {
-  let arr = porBarrio.get(e.b);
-  if (!arr) porBarrio.set(e.b, (arr = []));
-  arr.push(e);
-}
-let seleccion = [];
-for (const [, arr] of [...porBarrio.entries()].sort((a, b) => a[0] - b[0])) {
-  shuffle(arr, rnd);
-  seleccion.push(...arr.slice(0, CAP_POR_BARRIO));
-}
-if (seleccion.length > TARGET_TOTAL) {
-  shuffle(seleccion, rnd);
-  seleccion = seleccion.slice(0, TARGET_TOTAL);
-}
-shuffle(seleccion, rnd); // orden final pre-mezclado: habilita "mapa del día" por bloques
-
-// ---------- 6. emitir ----------
-const outDir = join(ROOT, 'src', 'data');
-mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, 'esquinas.json'), JSON.stringify(seleccion));
-writeFileSync(join(outDir, 'barrios.json'), JSON.stringify(BARRIOS));
-
-// ---------- 7. overlays didácticos: comunas y barrios simplificados + etiquetas ----------
 function simplificarRing(ring, tol) {
-  // Douglas-Peucker sobre grados, con lng compensado por latitud
   const kx = Math.cos((-34.6 * Math.PI) / 180);
   const perp = (p, a, b) => {
     const ax = (b[0] - a[0]) * kx, ay = b[1] - a[1];
@@ -269,13 +148,12 @@ function simplificarRing(ring, tol) {
   return out.length >= 4 ? out : ring;
 }
 function simplificarGeom(geom, tol) {
-  const simp = (rings) => rings.map((r) => simplificarRing(r, tol));
+  const simp = (rings) => rings.map((r) => simplificarRing(r, tol).map(([x, y]) => [+x.toFixed(6), +y.toFixed(6)]));
   return geom.type === 'Polygon'
     ? { type: 'Polygon', coordinates: simp(geom.coordinates) }
     : { type: 'MultiPolygon', coordinates: geom.coordinates.map(simp) };
 }
 function centroide(geom) {
-  // centroide del anillo exterior más grande (shoelace)
   const anillos = geom.type === 'Polygon' ? [geom.coordinates[0]] : geom.coordinates.map((p) => p[0]);
   let mejor = null, mejorArea = 0;
   for (const ring of anillos) {
@@ -286,51 +164,323 @@ function centroide(geom) {
     }
     if (Math.abs(a) > mejorArea) { mejorArea = Math.abs(a); mejor = [cx / (3 * a), cy / (3 * a)]; }
   }
-  return mejor;
+  return mejor.map((v) => +v.toFixed(6));
 }
-const geoDir = join(ROOT, 'public', 'geo');
-mkdirSync(geoDir, { recursive: true });
 
-const comunasFC = JSON.parse(readFileSync(join(ROOT, 'data-src', 'comunas.geojson'), 'utf8'));
-const comunasOut = { type: 'FeatureCollection', features: [] };
-const comunasLabels = { type: 'FeatureCollection', features: [] };
-for (const f of comunasFC.features) {
-  const num = Math.round(f.properties.comuna);
-  const geom = simplificarGeom(f.geometry, 0.00012);
-  comunasOut.features.push({ type: 'Feature', properties: { comuna: num }, geometry: geom });
-  comunasLabels.features.push({
-    type: 'Feature', properties: { comuna: num, etiqueta: `Comuna ${num}` },
-    geometry: { type: 'Point', coordinates: centroide(f.geometry).map((v) => +v.toFixed(6)) },
-  });
-}
-writeFileSync(join(geoDir, 'comunas.geojson'), JSON.stringify(comunasOut));
-writeFileSync(join(geoDir, 'comunas-labels.geojson'), JSON.stringify(comunasLabels));
+// ---------- descarga OSM por zona (con caché y partición de bbox) ----------
+const ENDPOINTS_OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+const HEADERS = {
+  'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+  'User-Agent': 'ubicamba-dataset/2.0 (juego educativo; contacto: 00medina.nicolas@gmail.com)',
+  Accept: 'application/json',
+};
 
-const barriosOut = { type: 'FeatureCollection', features: [] };
-const barriosLabels = { type: 'FeatureCollection', features: [] };
-for (const f of barriosFC.features) {
-  const b = BARRIO_POR_CLAVE.get(normalizar(f.properties.nombre));
-  if (!b) continue;
-  barriosOut.features.push({
-    type: 'Feature', properties: { id: b.id, nombre: b.nombre, comuna: b.comuna },
-    geometry: simplificarGeom(f.geometry, 0.00008),
-  });
-  barriosLabels.features.push({
-    type: 'Feature', properties: { id: b.id, nombre: b.nombre, comuna: b.comuna },
-    geometry: { type: 'Point', coordinates: centroide(f.geometry).map((v) => +v.toFixed(6)) },
-  });
+async function consultarOverpass(bbox) {
+  const query = `[out:json][timeout:300][bbox:${bbox.join(',')}];
+way["highway"~"^(primary|secondary|tertiary|residential|living_street|unclassified|pedestrian)$"]["name"];
+out body;
+>;
+out skel qt;`;
+  for (let intento = 0; intento < 2; intento++) {
+    for (const url of ENDPOINTS_OVERPASS) {
+      try {
+        console.log(`  Overpass ${url.split('/')[2]} bbox=${bbox.map((n) => n.toFixed(2)).join(',')}`);
+        const res = await fetch(url, { method: 'POST', headers: HEADERS, body: 'data=' + encodeURIComponent(query) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (!json.elements?.length) throw new Error('respuesta vacía' + (json.remark ? ` (${json.remark})` : ''));
+        return json.elements;
+      } catch (e) {
+        console.warn('    falló:', e.message);
+      }
+    }
+    console.log('  reintento en 20 s...');
+    await new Promise((r) => setTimeout(r, 20000));
+  }
+  return null;
 }
-writeFileSync(join(geoDir, 'barrios.geojson'), JSON.stringify(barriosOut));
-writeFileSync(join(geoDir, 'barrios-labels.geojson'), JSON.stringify(barriosLabels));
-console.log('Overlays escritos en public/geo/');
 
-const resumen = {};
-for (const e of seleccion) {
-  const b = BARRIOS[e.b - 1];
-  resumen[b.nombre] = (resumen[b.nombre] || 0) + 1;
+async function elementosOSM(bbox, profundidad = 0) {
+  const directo = await consultarOverpass(bbox);
+  if (directo) return directo;
+  if (profundidad >= 2) throw new Error('Overpass agotado incluso con bbox partida');
+  console.log('  partiendo bbox en 2 por latitud...');
+  const [latMin, lngMin, latMax, lngMax] = bbox;
+  const latMedia = (latMin + latMax) / 2;
+  const a = await elementosOSM([latMin, lngMin, latMedia, lngMax], profundidad + 1);
+  const b = await elementosOSM([latMedia, lngMin, latMax, lngMax], profundidad + 1);
+  const vistos = new Set();
+  const union = [];
+  for (const el of [...a, ...b]) {
+    const clave = el.type + el.id;
+    if (!vistos.has(clave)) { vistos.add(clave); union.push(el); }
+  }
+  return union;
 }
-console.log('\nTotal final:', seleccion.length, 'esquinas');
-console.log('Por barrio:', Object.entries(resumen).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n}=${c}`).join(', '));
-const conAv = seleccion.filter((e) => /^avenida /i.test(e.s1) || /^avenida /i.test(e.s2)).length;
-console.log('Con avenida:', conAv);
-console.log('Muestra:', JSON.stringify(seleccion.slice(0, 5), null, 1));
+
+async function osmDeZona(zona) {
+  const cache = join(DATA_SRC, `osm-${zona.id}.json`);
+  if (existsSync(cache)) {
+    console.log(`[${zona.id}] usando caché OSM`);
+    return JSON.parse(readFileSync(cache, 'utf8')).elements ?? JSON.parse(readFileSync(cache, 'utf8'));
+  }
+  console.log(`[${zona.id}] descargando calles de OSM...`);
+  const elements = await elementosOSM(zona.bbox);
+  writeFileSync(cache, JSON.stringify({ elements }));
+  return elements;
+}
+
+// ---------- partidos del GBA (IGN WFS, con caché) ----------
+async function partidosIGN() {
+  const cache = join(DATA_SRC, 'partidos-ign.geojson');
+  if (existsSync(cache)) return JSON.parse(readFileSync(cache, 'utf8'));
+  console.log('Descargando partidos del IGN (WFS)...');
+  const base = 'https://wms.ign.gob.ar/geoserver/ows?service=WFS&version=1.1.0&request=GetFeature&typeName=ign:departamento&outputFormat=application/json';
+  const intentos = [
+    base + '&CQL_FILTER=' + encodeURIComponent("in1 LIKE '06%' AND BBOX(geom,-59.05,-35.05,-57.95,-34.25)"),
+    base + '&CQL_FILTER=' + encodeURIComponent("in1 LIKE '06%'"),
+  ];
+  for (const url of intentos) {
+    try {
+      const res = await fetch(url, { headers: { 'User-Agent': HEADERS['User-Agent'] } });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const fc = await res.json();
+      if (!fc.features?.length) throw new Error('sin features');
+      console.log(`  ${fc.features.length} departamentos recibidos`);
+      writeFileSync(cache, JSON.stringify(fc));
+      return fc;
+    } catch (e) {
+      console.warn('  falló:', e.message);
+    }
+  }
+  throw new Error('No se pudieron descargar los partidos del IGN');
+}
+
+// ---------- detección de esquinas ----------
+function esquinasDesdeOSM(elements, poligonos) {
+  const nodos = new Map();
+  const vias = [];
+  for (const el of elements) {
+    if (el.type === 'node') nodos.set(el.id, [el.lon, el.lat]);
+    else if (el.type === 'way' && el.tags?.name) vias.push(el);
+  }
+  const porNodo = new Map();
+  for (const via of vias) {
+    const nombre = via.tags.name.trim();
+    if (/sin nombre/i.test(nombre)) continue;
+    for (const ref of via.nodes) {
+      let set = porNodo.get(ref);
+      if (!set) porNodo.set(ref, (set = new Set()));
+      set.add(nombre);
+    }
+  }
+  const porDupla = new Map();
+  for (const [id, nombres] of porNodo) {
+    if (nombres.size < 2) continue;
+    const coord = nodos.get(id);
+    if (!coord) continue;
+    const orden = [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
+    for (let i = 0; i < orden.length; i++) {
+      for (let j = i + 1; j < orden.length; j++) {
+        const clave = orden[i] + '||' + orden[j];
+        let clusters = porDupla.get(clave);
+        if (!clusters) porDupla.set(clave, (clusters = []));
+        const cercano = clusters.find((c) => metros(c.lat / c.n, c.lng / c.n, coord[1], coord[0]) < CLUSTER_M);
+        if (cercano) { cercano.lng += coord[0]; cercano.lat += coord[1]; cercano.n++; }
+        else clusters.push({ lng: coord[0], lat: coord[1], n: 1 });
+      }
+    }
+  }
+  const esquinas = [];
+  let fuera = 0;
+  for (const [clave, clusters] of porDupla) {
+    const [s1, s2] = clave.split('||');
+    for (const c of clusters) {
+      const lat = c.lat / c.n, lng = c.lng / c.n;
+      const p = poligonos.find(
+        (p) => lng >= p.minX && lng <= p.maxX && lat >= p.minY && lat <= p.maxY && dentroDePoligono(lng, lat, p.geom)
+      );
+      if (!p) { fuera++; continue; }
+      esquinas.push({ s1, s2, lat: +lat.toFixed(7), lng: +lng.toFixed(7), b: p.area.id });
+    }
+  }
+  return { esquinas, fuera, viasConNombre: vias.length };
+}
+
+function balancear(esquinas, cap, rnd) {
+  const porArea = new Map();
+  for (const e of esquinas) {
+    let arr = porArea.get(e.b);
+    if (!arr) porArea.set(e.b, (arr = []));
+    arr.push(e);
+  }
+  const seleccion = [];
+  for (const [, arr] of [...porArea.entries()].sort((a, b) => a[0] - b[0])) {
+    shuffle(arr, rnd);
+    seleccion.push(...arr.slice(0, cap));
+  }
+  return shuffle(seleccion, rnd);
+}
+
+// ---------- proceso por zona ----------
+const rnd = mulberry32(SEED);
+const barriosFC = JSON.parse(readFileSync(join(DATA_SRC, 'barrios.geojson'), 'utf8'));
+
+for (const zona of ZONAS) {
+  console.log(`\n=== ${zona.nombre} ===`);
+  let areas, poligonos;
+
+  if (zona.id === 'caba') {
+    areas = BARRIOS;
+    poligonos = [];
+    for (const f of barriosFC.features) {
+      const area = BARRIO_POR_CLAVE.get(normalizar(f.properties.nombre));
+      if (!area) { console.warn('Barrio sin match:', f.properties.nombre); continue; }
+      poligonos.push({ area, geom: f.geometry, ...bboxDeGeom(f.geometry) });
+    }
+  } else {
+    const ign = await partidosIGN();
+    const buscados = new Map(zona.partidos.map((n) => [normalizar(n), n]));
+    const encontrados = new Map();
+    for (const f of ign.features) {
+      const clave = normalizar(f.properties.nam ?? '');
+      if (buscados.has(clave) && !encontrados.has(clave)) encontrados.set(clave, f);
+    }
+    const faltan = [...buscados.keys()].filter((k) => !encontrados.has(k));
+    if (faltan.length) throw new Error(`Partidos no encontrados en IGN: ${faltan.join(', ')}`);
+    areas = [...encontrados.values()]
+      .map((f) => ({ nombre: buscados.get(normalizar(f.properties.nam)), feature: f }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      .map((x, i) => ({ id: i + 1, nombre: x.nombre, feature: x.feature }));
+    poligonos = areas.map((a) => ({ area: a, geom: a.feature.geometry, ...bboxDeGeom(a.feature.geometry) }));
+  }
+
+  const elements = await osmDeZona(zona);
+  const { esquinas, fuera, viasConNombre } = esquinasDesdeOSM(elements, poligonos);
+  console.log(`vías con nombre: ${viasConNombre} · esquinas en zona: ${esquinas.length} (descartadas: ${fuera})`);
+  const seleccion = balancear(esquinas, zona.cap, rnd);
+
+  const areasOut = areas.map(({ id, nombre, grupo }) => (grupo ? { id, nombre, grupo } : { id, nombre }));
+  writeFileSync(join(OUT_DATA, `zona-${zona.id}.json`), JSON.stringify({ nombre: zona.nombre, areas: areasOut, esquinas: seleccion }));
+  const resumen = {};
+  for (const e of seleccion) resumen[areasOut[e.b - 1].nombre] = (resumen[areasOut[e.b - 1].nombre] || 0) + 1;
+  console.log(`seleccionadas: ${seleccion.length} → ${Object.entries(resumen).map(([n, c]) => `${n}=${c}`).join(', ')}`);
+
+  // overlays
+  if (zona.id === 'caba') {
+    const comunasFC = JSON.parse(readFileSync(join(DATA_SRC, 'comunas.geojson'), 'utf8'));
+    const comunasOut = { type: 'FeatureCollection', features: [] };
+    const comunasLabels = { type: 'FeatureCollection', features: [] };
+    for (const f of comunasFC.features) {
+      const num = Math.round(f.properties.comuna);
+      comunasOut.features.push({ type: 'Feature', properties: { comuna: num }, geometry: simplificarGeom(f.geometry, 0.00012) });
+      comunasLabels.features.push({
+        type: 'Feature', properties: { etiqueta: `Comuna ${num}` },
+        geometry: { type: 'Point', coordinates: centroide(f.geometry) },
+      });
+    }
+    writeFileSync(join(OUT_GEO, 'comunas.geojson'), JSON.stringify(comunasOut));
+    writeFileSync(join(OUT_GEO, 'comunas-labels.geojson'), JSON.stringify(comunasLabels));
+
+    const barriosOut = { type: 'FeatureCollection', features: [] };
+    const barriosLabels = { type: 'FeatureCollection', features: [] };
+    for (const p of poligonos) {
+      barriosOut.features.push({
+        type: 'Feature', properties: { etiqueta: p.area.nombre },
+        geometry: simplificarGeom(p.geom, 0.00008),
+      });
+      barriosLabels.features.push({
+        type: 'Feature', properties: { etiqueta: p.area.nombre },
+        geometry: { type: 'Point', coordinates: centroide(p.geom) },
+      });
+    }
+    writeFileSync(join(OUT_GEO, 'barrios.geojson'), JSON.stringify(barriosOut));
+    writeFileSync(join(OUT_GEO, 'barrios-labels.geojson'), JSON.stringify(barriosLabels));
+  } else {
+    const lineas = { type: 'FeatureCollection', features: [] };
+    const labels = { type: 'FeatureCollection', features: [] };
+    for (const p of poligonos) {
+      lineas.features.push({
+        type: 'Feature', properties: { etiqueta: p.area.nombre },
+        geometry: simplificarGeom(p.geom, 0.00025),
+      });
+      labels.features.push({
+        type: 'Feature', properties: { etiqueta: p.area.nombre },
+        geometry: { type: 'Point', coordinates: centroide(p.geom) },
+      });
+    }
+    writeFileSync(join(OUT_GEO, `partidos-${zona.id}.geojson`), JSON.stringify(lineas));
+    writeFileSync(join(OUT_GEO, `partidos-${zona.id}-labels.geojson`), JSON.stringify(labels));
+  }
+}
+
+// ---------- avenidas principales de CABA (para el modo Avenidas) ----------
+console.log('\n=== Avenidas ===');
+{
+  const elements = JSON.parse(readFileSync(join(DATA_SRC, 'osm-caba.json'), 'utf8')).elements;
+  const nodos = new Map();
+  for (const el of elements) if (el.type === 'node') nodos.set(el.id, [el.lon, el.lat]);
+
+  const poligonosBarrios = [];
+  for (const f of barriosFC.features) {
+    const area = BARRIO_POR_CLAVE.get(normalizar(f.properties.nombre));
+    if (area) poligonosBarrios.push({ area, geom: f.geometry, ...bboxDeGeom(f.geometry) });
+  }
+  const barrioDePunto = (lng, lat) =>
+    poligonosBarrios.find(
+      (p) => lng >= p.minX && lng <= p.maxX && lat >= p.minY && lat <= p.maxY && dentroDePoligono(lng, lat, p.geom)
+    )?.area.nombre;
+
+  const TIPOS_AV = new Set(['trunk', 'primary', 'secondary']);
+  const porNombre = new Map();
+  for (const el of elements) {
+    if (el.type !== 'way' || !el.tags?.name) continue;
+    if (!TIPOS_AV.has(el.tags.highway)) continue;
+    if (!/^avenida /i.test(el.tags.name)) continue;
+    const linea = el.nodes.map((id) => nodos.get(id)).filter(Boolean);
+    if (linea.length < 2) continue;
+    let arr = porNombre.get(el.tags.name.trim());
+    if (!arr) porNombre.set(el.tags.name.trim(), (arr = []));
+    arr.push(linea);
+  }
+
+  const simplificarLinea = (pts, tol) => {
+    const ring = simplificarRing(pts, tol);
+    return (ring.length >= 2 ? ring : pts).map(([x, y]) => [+x.toFixed(5), +y.toFixed(5)]);
+  };
+
+  const avenidas = [];
+  for (const [nombre, lineas] of porNombre) {
+    let largo = 0;
+    const barriosCruzados = new Set();
+    for (const linea of lineas) {
+      for (let i = 1; i < linea.length; i++) {
+        largo += metros(linea[i - 1][1], linea[i - 1][0], linea[i][1], linea[i][0]);
+      }
+      for (let i = 0; i < linea.length; i += 12) {
+        const b = barrioDePunto(linea[i][0], linea[i][1]);
+        if (b) barriosCruzados.add(b);
+      }
+    }
+    if (largo < 1200 || !barriosCruzados.size) continue;
+    avenidas.push({
+      nombre,
+      largoKm: +(largo / 1000).toFixed(1),
+      barrios: [...barriosCruzados],
+      lineas: lineas.map((l) => simplificarLinea(l, 0.00012)),
+    });
+  }
+  avenidas.sort((a, b) => b.largoKm - a.largoKm);
+  const top = avenidas.slice(0, 90);
+  shuffle(top, mulberry32(SEED + 1)); // orden pre-mezclado, igual que las esquinas
+  writeFileSync(join(OUT_DATA, 'avenidas.json'), JSON.stringify(top));
+  console.log(`avenidas emitidas: ${top.length} (de ${avenidas.length} candidatas)`);
+  console.log('las 5 más largas:', avenidas.slice(0, 5).map((a) => `${a.nombre} (${a.largoKm} km)`).join(' · '));
+}
+
+console.log('\nListo.');

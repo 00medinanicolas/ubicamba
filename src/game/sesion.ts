@@ -1,6 +1,6 @@
 import type { Sesion } from './tipos';
 
-const CLAVE = 'ubicamba-sesion';
+const CLAVE = 'ubicamba-sesion-v2';
 
 export function cargarSesion(): Sesion | null {
   try {

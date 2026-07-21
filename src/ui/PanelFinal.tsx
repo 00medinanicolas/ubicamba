@@ -1,13 +1,11 @@
 import { PUNTOS_MAX } from '../game/logica';
-import { colorComuna } from './Menu';
 
 export interface FilaFinal {
   etiqueta: string;
-  esquina: string;
-  barrio: string;
-  comuna: number;
-  distancia: number;
-  puntos: number;
+  titulo: string;
+  sub: string;
+  resultado: string;
+  colorPunto?: string;
 }
 
 export function formatoDistancia(m: number): string {
@@ -33,15 +31,13 @@ export default function PanelFinal({ filas, total, copiado, onCompartir, onNueva
           <li key={f.etiqueta}>
             <span className="desglose-ronda">{f.etiqueta}</span>
             <span className="desglose-esquina">
-              {f.esquina}
+              {f.titulo}
               <small>
-                <span className="punto-comuna" style={{ background: colorComuna(f.comuna) }} />
-                {f.barrio} · Comuna {f.comuna}
+                {f.colorPunto && <span className="punto-comuna" style={{ background: f.colorPunto }} />}
+                {f.sub}
               </small>
             </span>
-            <span className="desglose-puntos">
-              {formatoDistancia(f.distancia)} — <strong>{f.puntos} pts</strong>
-            </span>
+            <span className="desglose-puntos">{f.resultado}</span>
           </li>
         ))}
       </ul>

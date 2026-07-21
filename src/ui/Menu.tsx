@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Barrio } from '../game/tipos';
+import type { Area, DatosZona, ZonaId } from '../game/tipos';
 import { RONDAS } from '../game/logica';
+import { IDS_ZONA, ZONAS, type ZonaDef } from '../game/zonas';
+import Archivo from './Archivo';
 
 export const COLORES_COMUNA = [
   '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#10b981', '#14b8a6',
@@ -9,16 +11,20 @@ export const COLORES_COMUNA = [
 export const colorComuna = (c: number) => COLORES_COMUNA[(c - 1) % COLORES_COMUNA.length];
 
 interface Props {
-  barrios: Barrio[];
-  conteo: Map<number, number>;
+  zona: ZonaDef;
+  datos: DatosZona | null;
+  onZona: (z: ZonaId) => void;
   onDia: () => void;
   onPractica: () => void;
-  onPersonalizada: (barrioIds: number[]) => void;
+  onPorAreas: (ids: number[]) => void;
+  onAvenidas: () => void;
+  onArchivo: (dia: number) => void;
 }
 
-export default function Menu({ barrios, conteo, onDia, onPractica, onPersonalizada }: Props) {
+export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorAreas, onAvenidas, onArchivo }: Props) {
   const [abierto, setAbierto] = useState(false);
-  const [modal, setModal] = useState(false);
+  const [modalAreas, setModalAreas] = useState(false);
+  const [modalArchivo, setModalArchivo] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,6 +36,11 @@ export default function Menu({ barrios, conteo, onDia, onPractica, onPersonaliza
     return () => document.removeEventListener('mousedown', cerrar);
   }, [abierto]);
 
+  const item = (accion: () => void) => () => {
+    setAbierto(false);
+    accion();
+  };
+
   return (
     <div className="menu-wrap" ref={wrapRef}>
       <button type="button" className="menu-btn" onClick={() => setAbierto((v) => !v)}>
@@ -37,47 +48,84 @@ export default function Menu({ barrios, conteo, onDia, onPractica, onPersonaliza
       </button>
       {abierto && (
         <div className="menu-lista">
-          <button type="button" onClick={() => { setAbierto(false); onDia(); }}>Mapa del día</button>
-          <button type="button" onClick={() => { setAbierto(false); onPractica(); }}>Práctica libre</button>
-          <button type="button" onClick={() => { setAbierto(false); setModal(true); }}>Por barrios…</button>
+          <div className="menu-zonas">
+            {IDS_ZONA.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`zona-chip${id === zona.id ? ' activo' : ''}`}
+                onClick={item(() => onZona(id))}
+              >
+                {ZONAS[id].corto}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={item(onDia)}>Mapa del día <small>CABA</small></button>
+          <button type="button" onClick={item(onPractica)}>Práctica libre <small>{zona.corto}</small></button>
+          <button type="button" onClick={item(() => setModalAreas(true))}>
+            Por {zona.etiquetaAreas.toLowerCase()}… <small>{zona.corto}</small>
+          </button>
+          <button type="button" onClick={item(onAvenidas)}>Modo Avenidas <small>CABA</small></button>
+          <button type="button" onClick={item(() => setModalArchivo(true))}>Archivo <small>días pasados</small></button>
         </div>
       )}
-      {modal && (
-        <ModalBarrios
-          barrios={barrios}
-          conteo={conteo}
-          onCerrar={() => setModal(false)}
-          onEmpezar={(ids) => { setModal(false); onPersonalizada(ids); }}
+      {modalAreas && datos && (
+        <ModalAreas
+          titulo={`Partida por ${zona.etiquetaAreas.toLowerCase()}`}
+          datos={datos}
+          onCerrar={() => setModalAreas(false)}
+          onEmpezar={(ids) => {
+            setModalAreas(false);
+            onPorAreas(ids);
+          }}
+        />
+      )}
+      {modalArchivo && (
+        <Archivo
+          onCerrar={() => setModalArchivo(false)}
+          onElegir={(dia) => {
+            setModalArchivo(false);
+            onArchivo(dia);
+          }}
         />
       )}
     </div>
   );
 }
 
-function ModalBarrios({
-  barrios,
-  conteo,
+function ModalAreas({
+  titulo,
+  datos,
   onCerrar,
   onEmpezar,
 }: {
-  barrios: Barrio[];
-  conteo: Map<number, number>;
+  titulo: string;
+  datos: DatosZona;
   onCerrar: () => void;
   onEmpezar: (ids: number[]) => void;
 }) {
-  const [seleccion, setSeleccion] = useState<Set<number>>(() => new Set(barrios.map((b) => b.id)));
+  const [seleccion, setSeleccion] = useState<Set<number>>(() => new Set(datos.areas.map((a) => a.id)));
 
-  const porComuna = useMemo(() => {
-    const m = new Map<number, Barrio[]>();
-    for (const b of barrios) {
-      if (!m.has(b.comuna)) m.set(b.comuna, []);
-      m.get(b.comuna)!.push(b);
+  const conteo = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const e of datos.esquinas) m.set(e.b, (m.get(e.b) ?? 0) + 1);
+    return m;
+  }, [datos]);
+
+  const grupos = useMemo(() => {
+    const conGrupo = datos.areas.some((a) => a.grupo !== undefined);
+    if (!conGrupo) return [[0, datos.areas] as [number, Area[]]];
+    const m = new Map<number, Area[]>();
+    for (const a of datos.areas) {
+      const g = a.grupo ?? 0;
+      if (!m.has(g)) m.set(g, []);
+      m.get(g)!.push(a);
     }
     return [...m.entries()].sort((a, b) => a[0] - b[0]);
-  }, [barrios]);
+  }, [datos]);
 
-  const todos = seleccion.size === barrios.length;
-  const disponibles = barrios.reduce((acc, b) => (seleccion.has(b.id) ? acc + (conteo.get(b.id) ?? 0) : acc), 0);
+  const todos = seleccion.size === datos.areas.length;
+  const disponibles = datos.areas.reduce((acc, a) => (seleccion.has(a.id) ? acc + (conteo.get(a.id) ?? 0) : acc), 0);
   const alcanza = disponibles >= RONDAS;
 
   const alternar = (id: number) =>
@@ -92,32 +140,34 @@ function ModalBarrios({
     <div className="modal-fondo" onClick={onCerrar}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-encabezado">
-          <span>Partida por barrios</span>
+          <span>{titulo}</span>
           <button type="button" className="modal-cerrar" onClick={onCerrar}>✕</button>
         </div>
         <button
           type="button"
           className="btn-secundario"
-          onClick={() => setSeleccion(todos ? new Set() : new Set(barrios.map((b) => b.id)))}
+          onClick={() => setSeleccion(todos ? new Set() : new Set(datos.areas.map((a) => a.id)))}
         >
           {todos ? 'Destildar todos' : 'Seleccionar todos'}
         </button>
         <div className="barrios-scroll">
-          {porComuna.map(([comuna, lista]) => (
-            <div key={comuna} className="grupo-comuna">
-              <div className="grupo-titulo" style={{ color: colorComuna(comuna) }}>
-                Comuna {comuna}
-              </div>
+          {grupos.map(([g, lista]) => (
+            <div key={g} className="grupo-comuna">
+              {g > 0 && (
+                <div className="grupo-titulo" style={{ color: colorComuna(g) }}>
+                  Comuna {g}
+                </div>
+              )}
               <div className="chips">
-                {lista.map((b) => (
+                {lista.map((a) => (
                   <button
-                    key={b.id}
+                    key={a.id}
                     type="button"
-                    className={`chip${seleccion.has(b.id) ? ' activo' : ''}`}
-                    style={{ '--color-comuna': colorComuna(comuna) } as React.CSSProperties}
-                    onClick={() => alternar(b.id)}
+                    className={`chip${seleccion.has(a.id) ? ' activo' : ''}`}
+                    style={{ '--color-comuna': g > 0 ? colorComuna(g) : '#4cc2ff' } as React.CSSProperties}
+                    onClick={() => alternar(a.id)}
                   >
-                    {b.nombre}
+                    {a.nombre}
                   </button>
                 ))}
               </div>
@@ -125,7 +175,7 @@ function ModalBarrios({
           ))}
         </div>
         <button type="button" className="btn-primario" disabled={!alcanza} onClick={() => onEmpezar([...seleccion])}>
-          {alcanza ? 'Empezar' : 'Elegí al menos un barrio'}
+          {alcanza ? 'Empezar' : `Elegí al menos un ${titulo.includes('partidos') ? 'partido' : 'barrio'}`}
         </button>
       </div>
     </div>

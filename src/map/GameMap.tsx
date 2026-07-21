@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
-import type { GeoJSONSource, LngLatBoundsLike, Map as MapaML } from 'maplibre-gl';
+import type { GeoJSONSource, Map as MapaML } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { crearEstilo, type Basemap } from './basemap';
+import type { OverlayDef, ZonaDef } from '../game/zonas';
 
 export interface PinResultado {
   guess: [number, number]; // [lat, lng]
@@ -11,39 +12,26 @@ export interface PinResultado {
 }
 
 interface Props {
+  zona: ZonaDef;
   basemap: Basemap;
   resultados: PinResultado[];
   clickHabilitado: boolean;
   onPick: (latlng: [number, number]) => void;
   verComunas: boolean;
-  verBarrios: boolean;
+  verAreas: boolean;
+  /** geometría destacada (modo Avenidas); null = nada */
+  destacado: GeoJSON.FeatureCollection | null;
 }
 
-const ENCUADRE: LngLatBoundsLike = [
-  [-58.531, -34.708],
-  [-58.333, -34.524],
-];
-const LIMITES: LngLatBoundsLike = [
-  [-58.65, -34.78],
-  [-58.22, -34.45],
-];
-
-// Overlays didácticos (se descargan una sola vez por sesión)
-const overlays: Record<string, GeoJSON.FeatureCollection | null> = {
-  comunas: null,
-  'comunas-labels': null,
-  barrios: null,
-  'barrios-labels': null,
-};
-let overlaysPromesa: Promise<void> | null = null;
-function cargarOverlays(): Promise<void> {
-  overlaysPromesa ??= Promise.all(
-    Object.keys(overlays).map(async (clave) => {
-      const res = await fetch(`/geo/${clave}.geojson`);
-      if (res.ok) overlays[clave] = await res.json();
-    })
-  ).then(() => undefined);
-  return overlaysPromesa;
+// caché de overlays descargados (por URL, vive toda la sesión)
+const cacheOverlay = new Map<string, Promise<GeoJSON.FeatureCollection | null>>();
+function datosOverlay(url: string): Promise<GeoJSON.FeatureCollection | null> {
+  let p = cacheOverlay.get(url);
+  if (!p) {
+    p = fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    cacheOverlay.set(url, p);
+  }
+  return p;
 }
 
 function puntoDiv(fondo: string, borde: string): HTMLDivElement {
@@ -64,23 +52,53 @@ function pinRespuesta(etiqueta: string): HTMLDivElement {
 
 const FC_VACIA: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-export default function GameMap({ basemap, resultados, clickHabilitado, onPick, verComunas, verBarrios }: Props) {
+function bboxDeFC(fc: GeoJSON.FeatureCollection): [[number, number], [number, number]] | null {
+  let minX = 180, minY = 90, maxX = -180, maxY = -90, alguno = false;
+  const visitar = (coords: unknown): void => {
+    if (Array.isArray(coords) && typeof coords[0] === 'number') {
+      const [x, y] = coords as [number, number];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      alguno = true;
+    } else if (Array.isArray(coords)) {
+      coords.forEach(visitar);
+    }
+  };
+  for (const f of fc.features) visitar((f.geometry as GeoJSON.LineString).coordinates);
+  return alguno ? [[minX, minY], [maxX, maxY]] : null;
+}
+
+export default function GameMap({
+  zona,
+  basemap,
+  resultados,
+  clickHabilitado,
+  onPick,
+  verComunas,
+  verAreas,
+  destacado,
+}: Props) {
   const contRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<MapaML | null>(null);
   const marcadoresRef = useRef<maplibregl.Marker[]>([]);
   const listoRef = useRef(false);
+  const capasOverlayRef = useRef<string[]>([]);
 
-  // refs espejo para handlers y para re-armar capas tras cada setStyle
   const clickRef = useRef(clickHabilitado);
   const pickRef = useRef(onPick);
   const resultadosRef = useRef(resultados);
   const comunasRef = useRef(verComunas);
-  const barriosRef = useRef(verBarrios);
+  const areasRef = useRef(verAreas);
+  const zonaRef = useRef(zona);
+  const destacadoRef = useRef(destacado);
   clickRef.current = clickHabilitado;
   pickRef.current = onPick;
   resultadosRef.current = resultados;
   comunasRef.current = verComunas;
-  barriosRef.current = verBarrios;
+  areasRef.current = verAreas;
+  destacadoRef.current = destacado;
 
   useEffect(() => {
     let cancelado = false;
@@ -92,13 +110,12 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
       const mapa = new maplibregl.Map({
         container: contRef.current,
         style: estilo,
-        bounds: ENCUADRE,
+        bounds: zonaRef.current.encuadre,
         fitBoundsOptions: { padding: 12 },
-        maxBounds: LIMITES,
-        minZoom: 10.3,
+        maxBounds: zonaRef.current.limites,
+        minZoom: 9.5,
         maxZoom: 18.5,
         attributionControl: { compact: true },
-        // en dev permite leer el canvas (capturas de verificación); en prod queda apagado
         canvasContextAttributes: { preserveDrawingBuffer: import.meta.env.DEV },
       });
       mapaRef.current = mapa;
@@ -112,17 +129,11 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
       mapa.on('style.load', () => armarCapas(mapa));
       if (import.meta.env.DEV) {
         (window as unknown as Record<string, unknown>).__mapa = mapa;
-        mapa.on('style.load', () => console.debug('[ubicamba] style.load'));
         mapa.on('error', (e) => console.warn('[ubicamba] map error:', e.error?.message));
       }
-
-      cargarOverlays().then(() => {
-        if (!cancelado && mapa.isStyleLoaded()) armarCapas(mapa);
-      });
     }
 
     function armarCapas(mapa: MapaML) {
-      // líneas guess → esquina real
       if (!mapa.getSource('lineas')) {
         mapa.addSource('lineas', { type: 'geojson', data: FC_VACIA });
         mapa.addLayer({
@@ -138,69 +149,25 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
           paint: { 'line-color': '#fff', 'line-width': 3.5 },
         });
       }
-
-      // overlays didácticos
-      const agregar = (
-        clave: keyof typeof overlays,
-        capas: () => void
-      ) => {
-        const data = overlays[clave];
-        if (data && !mapa.getSource(clave)) {
-          mapa.addSource(clave, { type: 'geojson', data });
-          capas();
-        }
-      };
-
-      agregar('comunas', () => {
+      if (!mapa.getSource('destacado')) {
+        mapa.addSource('destacado', { type: 'geojson', data: destacadoRef.current ?? FC_VACIA });
         mapa.addLayer({
-          id: 'comunas-linea',
+          id: 'destacado-halo',
           type: 'line',
-          source: 'comunas',
-          layout: { visibility: comunasRef.current ? 'visible' : 'none' },
-          paint: { 'line-color': '#38bdf8', 'line-width': 2.2, 'line-dasharray': [2, 1.2] },
+          source: 'destacado',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#062033', 'line-width': 9, 'line-opacity': 0.75, 'line-blur': 1.5 },
         });
-      });
-      agregar('comunas-labels', () => {
         mapa.addLayer({
-          id: 'comunas-texto',
-          type: 'symbol',
-          source: 'comunas-labels',
-          layout: {
-            visibility: comunasRef.current ? 'visible' : 'none',
-            'text-field': ['get', 'etiqueta'],
-            'text-font': ['Noto Sans Bold'],
-            'text-size': 15,
-          },
-          paint: { 'text-color': '#7dd3fc', 'text-halo-color': 'rgba(0,0,0,.75)', 'text-halo-width': 1.6 },
+          id: 'destacado-trazo',
+          type: 'line',
+          source: 'destacado',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#4cc2ff', 'line-width': 4 },
         });
-      });
-      agregar('barrios', () => {
-        mapa.addLayer(
-          {
-            id: 'barrios-linea',
-            type: 'line',
-            source: 'barrios',
-            layout: { visibility: barriosRef.current ? 'visible' : 'none' },
-            paint: { 'line-color': '#fbbf24', 'line-width': 1.1, 'line-dasharray': [1, 1.6], 'line-opacity': 0.9 },
-          },
-          mapa.getLayer('comunas-linea') ? 'comunas-linea' : undefined
-        );
-      });
-      agregar('barrios-labels', () => {
-        mapa.addLayer({
-          id: 'barrios-texto',
-          type: 'symbol',
-          source: 'barrios-labels',
-          layout: {
-            visibility: barriosRef.current ? 'visible' : 'none',
-            'text-field': ['get', 'nombre'],
-            'text-font': ['Noto Sans Regular'],
-            'text-size': 11.5,
-          },
-          paint: { 'text-color': '#fcd34d', 'text-halo-color': 'rgba(0,0,0,.7)', 'text-halo-width': 1.4 },
-        });
-      });
-
+      }
+      capasOverlayRef.current = [];
+      agregarOverlays(mapa);
       aplicarResultados(mapa, resultadosRef.current);
       listoRef.current = true;
     }
@@ -216,6 +183,62 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function visibleDe(def: OverlayDef): 'visible' | 'none' {
+    const v = def.grupo === 'comunas' ? comunasRef.current : areasRef.current;
+    return v ? 'visible' : 'none';
+  }
+
+  function agregarOverlays(mapa: MapaML) {
+    const zonaAlPedir = zonaRef.current;
+    for (const def of zonaAlPedir.overlays) {
+      datosOverlay(def.url).then((data) => {
+        if (!data || mapaRef.current !== mapa) return;
+        if (zonaRef.current.id !== zonaAlPedir.id) return; // cambió la zona mientras bajaba
+        if (mapa.getSource(def.id)) return;
+        if (!mapa.isStyleLoaded() && !mapa.getSource('lineas')) return;
+        mapa.addSource(def.id, { type: 'geojson', data });
+        if (def.tipo === 'linea') {
+          mapa.addLayer(
+            {
+              id: def.id,
+              type: 'line',
+              source: def.id,
+              layout: { visibility: visibleDe(def) },
+              paint: {
+                'line-color': def.color,
+                'line-width': def.ancho ?? 1.5,
+                ...(def.dash ? { 'line-dasharray': def.dash } : {}),
+              },
+            },
+            mapa.getLayer('lineas-halo') ? 'lineas-halo' : undefined
+          );
+        } else {
+          mapa.addLayer({
+            id: def.id,
+            type: 'symbol',
+            source: def.id,
+            layout: {
+              visibility: visibleDe(def),
+              'text-field': ['get', 'etiqueta'],
+              'text-font': ['Noto Sans Bold'],
+              'text-size': def.tamano ?? 12,
+            },
+            paint: { 'text-color': def.color, 'text-halo-color': 'rgba(0,0,0,.75)', 'text-halo-width': 1.5 },
+          });
+        }
+        capasOverlayRef.current.push(def.id);
+      });
+    }
+  }
+
+  function quitarOverlays(mapa: MapaML) {
+    for (const id of capasOverlayRef.current) {
+      if (mapa.getLayer(id)) mapa.removeLayer(id);
+      if (mapa.getSource(id)) mapa.removeSource(id);
+    }
+    capasOverlayRef.current = [];
+  }
 
   function aplicarResultados(mapa: MapaML, res: PinResultado[]) {
     marcadoresRef.current.forEach((m) => m.remove());
@@ -243,12 +266,37 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
     (mapa.getSource('lineas') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: lineas });
   }
 
-  // marcadores y líneas al cambiar los resultados
+  // resultados → marcadores y líneas
   useEffect(() => {
     const mapa = mapaRef.current;
     if (mapa && listoRef.current) aplicarResultados(mapa, resultados);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultados]);
+
+  // cambio de zona → overlays nuevos + encuadre
+  useEffect(() => {
+    const anterior = zonaRef.current;
+    zonaRef.current = zona;
+    const mapa = mapaRef.current;
+    if (!mapa || anterior.id === zona.id) return;
+    if (listoRef.current) quitarOverlays(mapa);
+    mapa.setMaxBounds(zona.limites);
+    mapa.fitBounds(zona.encuadre, { padding: 12, duration: 900 });
+    if (listoRef.current) agregarOverlays(mapa);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zona]);
+
+  // geometría destacada (modo Avenidas)
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listoRef.current) return;
+    (mapa.getSource('destacado') as GeoJSONSource | undefined)?.setData(destacado ?? FC_VACIA);
+    if (destacado) {
+      const bbox = bboxDeFC(destacado);
+      if (bbox) mapa.fitBounds(bbox, { padding: 60, duration: 700, maxZoom: 14.5 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destacado]);
 
   // cambio de mapa base (plano ⇄ satélite)
   const basemapPrevio = useRef(basemap);
@@ -267,15 +315,11 @@ export default function GameMap({ basemap, resultados, clickHabilitado, onPick, 
   useEffect(() => {
     const mapa = mapaRef.current;
     if (!mapa || !listoRef.current) return;
-    for (const [capa, visible] of [
-      ['comunas-linea', verComunas],
-      ['comunas-texto', verComunas],
-      ['barrios-linea', verBarrios],
-      ['barrios-texto', verBarrios],
-    ] as const) {
-      if (mapa.getLayer(capa)) mapa.setLayoutProperty(capa, 'visibility', visible ? 'visible' : 'none');
+    for (const def of zonaRef.current.overlays) {
+      if (mapa.getLayer(def.id)) mapa.setLayoutProperty(def.id, 'visibility', visibleDe(def));
     }
-  }, [verComunas, verBarrios]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verComunas, verAreas]);
 
   // cursor
   useEffect(() => {

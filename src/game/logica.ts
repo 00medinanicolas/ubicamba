@@ -1,4 +1,5 @@
-import type { Esquina, Modo } from './tipos';
+import type { Avenida, Esquina, Juego, ZonaId } from './tipos';
+import { esZonaId } from './zonas';
 
 export const RONDAS = 5;
 export const PUNTOS_MAX = RONDAS * 100;
@@ -12,6 +13,10 @@ export function numeroDia(fecha: Date): number {
   return Math.floor((utc - EPOCA) / DIA_MS);
 }
 
+export function fechaDeDia(dia: number): Date {
+  return new Date(EPOCA + dia * DIA_MS);
+}
+
 /** Mapa del día: bloque de 5 esquinas consecutivas del array pre-mezclado. */
 export function indicesDelDia(dia: number, total: number): number[] {
   const bloques = Math.floor(total / RONDAS);
@@ -19,26 +24,25 @@ export function indicesDelDia(dia: number, total: number): number[] {
   return Array.from({ length: RONDAS }, (_, i) => inicio + i);
 }
 
-export function indicesAlAzar(total: number, cantidad = RONDAS): number[] {
-  const pool = Array.from({ length: total }, (_, i) => i);
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+function mezclar<T>(arr: T[], rnd: () => number = Math.random): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-  return pool.slice(0, cantidad);
+  return arr;
 }
 
-export function indicesPorBarrios(esquinas: Esquina[], barrios: number[]): number[] {
-  const set = new Set(barrios);
+export function indicesAlAzar(total: number, cantidad = RONDAS): number[] {
+  return mezclar(Array.from({ length: total }, (_, i) => i)).slice(0, cantidad);
+}
+
+export function indicesPorAreas(esquinas: Esquina[], areas: number[]): number[] {
+  const set = new Set(areas);
   const pool: number[] = [];
   esquinas.forEach((e, i) => {
     if (set.has(e.b)) pool.push(i);
   });
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, RONDAS);
+  return mezclar(pool).slice(0, RONDAS);
 }
 
 // ---------- distancia y puntaje ----------
@@ -70,33 +74,74 @@ export function nombreEsquina(e: Esquina): string {
   return e.s2 ? `${e.s1} y ${e.s2}` : e.s1;
 }
 
-// ---------- share por URL (misma semántica que UbiCABA: índices 1-based) ----------
-export function urlCompartir(indices: number[], barrios?: number[]): string {
-  const base = `/?e=${indices.map((i) => i + 1).join('-')}`;
-  return barrios && barrios.length ? `${base}&barrios=${barrios.join('-')}` : base;
+// ---------- opciones del modo Avenidas (determinísticas por índice) ----------
+function mulberry32(semilla: number): () => number {
+  let a = semilla >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-export interface PartidaDeURL {
-  indices: number[];
-  modo: Modo;
-  barriosSel: number[];
+/** 4 opciones (la correcta + 3 señuelos), iguales para todos los que jueguen este índice. */
+export function opcionesAvenida(avenidas: Avenida[], idx: number): string[] {
+  const rnd = mulberry32(idx * 7919 + 20260721);
+  const opciones = [avenidas[idx].nombre];
+  const usados = new Set([idx]);
+  while (opciones.length < 4 && usados.size < avenidas.length) {
+    const j = Math.floor(rnd() * avenidas.length);
+    if (usados.has(j)) continue;
+    usados.add(j);
+    opciones.push(avenidas[j].nombre);
+  }
+  return mezclar(opciones, rnd);
 }
 
-export function leerURL(totalEsquinas: number, esquinas: Esquina[], barriosValidos: Set<number>): PartidaDeURL | null {
-  const params = new URLSearchParams(window.location.search);
-  const e = params.get('e');
-  if (!e) return null;
-  const partes = e.split('-').map(Number);
-  if (partes.length !== RONDAS) return null;
-  const indices = partes.map((n) => n - 1);
-  if (!indices.every((i) => Number.isInteger(i) && i >= 0 && i < totalEsquinas)) return null;
+// ---------- share por URL ----------
+export interface ParamsPartida {
+  zona: ZonaId;
+  juego: Juego;
+  indices: number[] | null;
+  areasParam: number[] | null;
+}
 
-  const b = params.get('barrios');
-  if (b) {
-    const ids = b.split('-').map(Number);
-    if (ids.length && ids.every((id) => barriosValidos.has(id)) && indices.every((i) => ids.includes(esquinas[i].b))) {
-      return { indices, modo: 'personalizada', barriosSel: ids };
+export function urlCompartir(
+  indices: number[],
+  opts: { zona: ZonaId; juego: Juego; areas?: number[] }
+): string {
+  const p = new URLSearchParams();
+  if (opts.zona !== 'caba') p.set('z', opts.zona);
+  if (opts.juego === 'avenidas') p.set('j', 'av');
+  p.set('e', indices.map((i) => i + 1).join('-'));
+  if (opts.areas?.length) p.set('areas', opts.areas.join('-'));
+  return '/?' + p.toString();
+}
+
+/** Lectura cruda de la URL; la validación contra el dataset la hace App al cargar los datos. */
+export function parseURL(): ParamsPartida {
+  const p = new URLSearchParams(window.location.search);
+  const z = p.get('z');
+  const zona: ZonaId = esZonaId(z) ? z : 'caba';
+  const juego: Juego = p.get('j') === 'av' ? 'avenidas' : 'esquinas';
+
+  let indices: number[] | null = null;
+  const e = p.get('e');
+  if (e) {
+    const partes = e.split('-').map(Number);
+    if (partes.length === RONDAS && partes.every((n) => Number.isInteger(n) && n >= 1)) {
+      indices = partes.map((n) => n - 1);
     }
   }
-  return { indices, modo: 'link', barriosSel: [] };
+
+  let areasParam: number[] | null = null;
+  const a = p.get('areas');
+  if (a) {
+    const ids = a.split('-').map(Number);
+    if (ids.length && ids.every((n) => Number.isInteger(n) && n >= 1)) areasParam = ids;
+  }
+
+  return { zona, juego: juego === 'avenidas' && zona !== 'caba' ? 'esquinas' : juego, indices, areasParam };
 }
