@@ -1,0 +1,422 @@
+:root {
+  --fondo: #0e1116;
+  --panel: #161b24;
+  --panel-2: #1d2430;
+  --borde: #2a3342;
+  --texto: #e8ecf1;
+  --texto-2: #9aa7b8;
+  --acento: #4cc2ff;
+  --acento-2: #38bdf8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- HUD ---------- */
+.hud {
+  padding: 8px 12px 6px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--borde);
+  z-index: 20;
+}
+
+.hud-fila {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.marca {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.marca-sub {
+  font-weight: 500;
+  color: var(--texto-2);
+  font-size: 11px;
+}
+
+.ronda {
+  color: var(--texto-2);
+  font-size: 14px;
+}
+
+.puntaje {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.consigna {
+  margin-top: 4px;
+  font-size: 17px;
+}
+
+.consigna strong {
+  color: var(--acento);
+}
+
+/* ---------- menú ---------- */
+.menu-wrap {
+  position: relative;
+}
+
+.menu-btn,
+.btn-secundario {
+  background: var(--panel-2);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menu-btn:hover,
+.btn-secundario:hover {
+  border-color: var(--acento-2);
+}
+
+.menu-lista {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  overflow: hidden;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.menu-lista button {
+  background: none;
+  border: none;
+  color: var(--texto);
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.menu-lista button:hover {
+  background: rgba(76, 194, 255, 0.12);
+}
+
+/* ---------- mapa ---------- */
+.mapa-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.mapa {
+  position: absolute;
+  inset: 0;
+}
+
+.controles-mapa {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+
+.controles-mapa button {
+  background: rgba(22, 27, 36, 0.92);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 86px;
+}
+
+.controles-mapa button.activo {
+  border-color: var(--acento);
+  color: var(--acento);
+  font-weight: 700;
+}
+
+.pin-etiqueta {
+  background: rgba(15, 17, 22, 0.9);
+  color: #fff;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---------- pie / ficha ---------- */
+.pie {
+  background: var(--panel);
+  border-top: 1px solid var(--borde);
+  padding: 10px 12px;
+  min-height: 46px;
+  z-index: 20;
+}
+
+.pista {
+  color: var(--texto-2);
+  font-size: 14px;
+  display: block;
+  text-align: center;
+}
+
+.ficha {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.ficha-dato {
+  font-size: 14px;
+}
+
+.ficha-dato strong {
+  color: var(--acento);
+}
+
+.ficha-resultado {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn-primario {
+  background: var(--acento);
+  color: #062033;
+  font-weight: 800;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-primario:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-primario:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+.btn-siguiente {
+  padding: 6px 14px;
+}
+
+/* ---------- panel final ---------- */
+.panel-final {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.final-titulo {
+  font-size: 16px;
+  text-align: center;
+}
+
+.final-titulo strong {
+  color: var(--acento);
+  font-size: 20px;
+}
+
+.desglose {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.desglose li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.desglose-ronda {
+  color: var(--texto-2);
+  font-weight: 700;
+  width: 26px;
+}
+
+.desglose-esquina {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.desglose-esquina small {
+  color: var(--texto-2);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.punto-comuna {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.desglose-puntos {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.final-acciones {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* ---------- modal por barrios ---------- */
+.modal-fondo {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 14px;
+  width: min(560px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.modal-encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.modal-cerrar {
+  background: none;
+  border: none;
+  color: var(--texto-2);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.barrios-scroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.grupo-titulo {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  color: var(--texto-2);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chip.activo {
+  border-color: var(--color-comuna);
+  color: var(--texto);
+  background: color-mix(in srgb, var(--color-comuna) 18%, var(--panel-2));
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 560px) {
+  .marca-sub {
+    display: none;
+  }
+
+  .consigna {
+    font-size: 15px;
+  }
+
+  .controles-mapa button {
+    min-width: 72px;
+    padding: 5px 8px;
+  }
+
+  .final-acciones {
+    flex-direction: column;
+  }
+}

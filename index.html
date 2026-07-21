@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AD%3C/text%3E%3C/svg%3E"
+    />
+    <title>UbicAMBA — ¿Cuánto conocés Buenos Aires?</title>
+    <meta
+      name="description"
+      content="Juego didáctico de geografía porteña: encontrá esquinas en el mapa, aprendé comunas, barrios y avenidas. Inspirado en UbiCABA."
+    />
+  </head>
+  <body>
+    <script>
+      // Shim de testing: con ?rafshim=1, requestAnimationFrame sigue latiendo aunque
+      // la pestaña esté oculta (los paneles headless congelan rAF y MapLibre no carga).
+      // No afecta el uso normal: sin el parámetro no hace nada.
+      if (new URLSearchParams(location.search).has('rafshim')) {
+        var _cbs = [];
+        window.requestAnimationFrame = function (cb) { _cbs.push(cb); return _cbs.length; };
+        window.cancelAnimationFrame = function () {};
+        setInterval(function () {
+          var lote = _cbs.splice(0);
+          var t = performance.now();
+          for (var i = 0; i < lote.length; i++) {
+            try { lote[i](t); } catch (e) { console.error(e); }
+          }
+        }, 33);
+      }
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
