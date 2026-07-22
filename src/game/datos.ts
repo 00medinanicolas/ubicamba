@@ -1,11 +1,14 @@
 import type { Avenida, DatosZona, ZonaId } from './tipos';
 
+/** Resuelve rutas de assets respetando el base de Vite (en Pages la app vive bajo /ubicamba/). */
+export const ruta = (p: string) => import.meta.env.BASE_URL + p.replace(/^\//, '');
+
 const cacheZonas = new Map<ZonaId, Promise<DatosZona>>();
 
 export function cargarZona(zona: ZonaId): Promise<DatosZona> {
   let p = cacheZonas.get(zona);
   if (!p) {
-    p = fetch(`/data/zona-${zona}.json`).then((r) => {
+    p = fetch(ruta(`data/zona-${zona}.json`)).then((r) => {
       if (!r.ok) throw new Error(`No se pudo cargar la zona ${zona} (${r.status})`);
       return r.json() as Promise<DatosZona>;
     });
@@ -19,7 +22,7 @@ let cacheAvenidas: Promise<Avenida[]> | null = null;
 
 export function cargarAvenidas(): Promise<Avenida[]> {
   if (!cacheAvenidas) {
-    cacheAvenidas = fetch('/data/avenidas.json').then((r) => {
+    cacheAvenidas = fetch(ruta('data/avenidas.json')).then((r) => {
       if (!r.ok) throw new Error(`No se pudieron cargar las avenidas (${r.status})`);
       return r.json() as Promise<Avenida[]>;
     });

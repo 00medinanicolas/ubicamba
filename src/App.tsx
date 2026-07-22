@@ -27,14 +27,16 @@ function sesionBase(zona: ZonaId, juego: Juego, indices: number[], modo: Modo, a
 }
 
 function aplicarURL(s: Sesion) {
+  // path actual + query de la partida: funciona igual en / y bajo /ubicamba/ (Pages)
   let url =
-    s.modo === 'dia'
-      ? '/'
+    window.location.pathname +
+    (s.modo === 'dia'
+      ? ''
       : urlCompartir(s.indices, {
           zona: s.zona,
           juego: s.juego,
           areas: s.modo === 'personalizada' ? s.areasSel : undefined,
-        });
+        }));
   // conservar el shim de testing (dev) a través de las navegaciones internas
   if (new URLSearchParams(window.location.search).has('rafshim')) {
     url += (url.includes('?') ? '&' : '?') + 'rafshim=1';
@@ -241,7 +243,7 @@ export default function App() {
   async function compartirResultado() {
     if (!sesion) return;
     const lineaPuntos = sesion.resultados.map((r) => `${r.puntos}${emojiPuntos(r.puntos)}`).join(' ');
-    const link = `${window.location.origin}${urlCompartir(sesion.indices, {
+    const link = `${window.location.origin}${window.location.pathname}${urlCompartir(sesion.indices, {
       zona: sesion.zona,
       juego: sesion.juego,
       areas: sesion.modo === 'personalizada' ? sesion.areasSel : undefined,

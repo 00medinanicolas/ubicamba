@@ -108,6 +108,7 @@ export interface ParamsPartida {
   areasParam: number[] | null;
 }
 
+/** Devuelve solo el query string ("?z=…&e=…"); el path lo pone quien lo usa (en Pages la app vive bajo un subpath). */
 export function urlCompartir(
   indices: number[],
   opts: { zona: ZonaId; juego: Juego; areas?: number[] }
@@ -117,7 +118,7 @@ export function urlCompartir(
   if (opts.juego === 'avenidas') p.set('j', 'av');
   p.set('e', indices.map((i) => i + 1).join('-'));
   if (opts.areas?.length) p.set('areas', opts.areas.join('-'));
-  return '/?' + p.toString();
+  return '?' + p.toString();
 }
 
 /** Lectura cruda de la URL; la validación contra el dataset la hace App al cargar los datos. */

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 data-src/
+# material de análisis del UbiCABA original: solo referencia local, no se publica
+reference/
 .env
 .env.*
 *.local

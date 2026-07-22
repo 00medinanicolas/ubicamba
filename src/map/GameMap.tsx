@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapaML } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { crearEstilo, type Basemap } from './basemap';
+import { ruta } from '../game/datos';
 import type { OverlayDef, ZonaDef } from '../game/zonas';
 
 export interface PinResultado {
@@ -28,7 +29,7 @@ const cacheOverlay = new Map<string, Promise<GeoJSON.FeatureCollection | null>>(
 function datosOverlay(url: string): Promise<GeoJSON.FeatureCollection | null> {
   let p = cacheOverlay.get(url);
   if (!p) {
-    p = fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    p = fetch(ruta(url)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     cacheOverlay.set(url, p);
   }
   return p;
