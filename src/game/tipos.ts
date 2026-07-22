@@ -1,6 +1,43 @@
 export type ZonaId = 'caba' | 'norte' | 'oeste' | 'sur';
 
-export type Juego = 'esquinas' | 'avenidas';
+export type Juego = 'esquinas' | 'avenidas' | 'transporte';
+
+export interface LegTransporte {
+  tipo: 'subte' | 'tren' | 'caminar';
+  linea: string;
+  color: string;
+  desde: string | null;
+  hasta: string;
+  paradas: number;
+  min: number;
+  /** estaciones del tramo como [lng, lat] (vacío en caminatas) */
+  puntos: [number, number][];
+}
+
+export interface OpcionTransporte {
+  minutos: number;
+  optima: boolean;
+  legs: LegTransporte[];
+}
+
+export interface PuntoTransporte {
+  nombre: string;
+  red: 'subte' | 'tren';
+  lat: number;
+  lng: number;
+}
+
+export interface DesafioTransporte {
+  origen: PuntoTransporte;
+  destino: PuntoTransporte;
+  opciones: OpcionTransporte[];
+}
+
+export interface DatosTransporte {
+  version: string;
+  modos: string[];
+  desafios: DesafioTransporte[];
+}
 
 export interface Esquina {
   s1: string;

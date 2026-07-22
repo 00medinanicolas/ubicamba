@@ -476,6 +476,60 @@ body {
   font-style: normal;
 }
 
+/* ---------- itinerarios del modo transporte ---------- */
+.opciones-transporte {
+  grid-template-columns: 1fr 1fr;
+}
+
+.btn-itinerario {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.itinerario-legs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.leg-chip {
+  background: color-mix(in srgb, var(--color-leg) 22%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--color-leg) 65%, transparent);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.leg-chip small {
+  color: var(--texto-2);
+}
+
+.itinerario-transbordos {
+  color: var(--texto-2);
+  font-size: 11px;
+}
+
+.modal-rondas {
+  width: min(360px, 100%);
+}
+
+.modal-texto {
+  color: var(--texto-2);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+.rondas-opciones {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
 /* ---------- archivo (calendario) ---------- */
 .modal-archivo {
   width: min(400px, 100%);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Area, DatosZona, ZonaId } from '../game/tipos';
-import { RONDAS } from '../game/logica';
+import { RONDAS, TANDAS } from '../game/logica';
 import { IDS_ZONA, ZONAS, type ZonaDef } from '../game/zonas';
 import Archivo from './Archivo';
 
@@ -18,13 +18,15 @@ interface Props {
   onPractica: () => void;
   onPorAreas: (ids: number[]) => void;
   onAvenidas: () => void;
+  onTransporte: (rondas: number) => void;
   onArchivo: (dia: number) => void;
 }
 
-export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorAreas, onAvenidas, onArchivo }: Props) {
+export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorAreas, onAvenidas, onTransporte, onArchivo }: Props) {
   const [abierto, setAbierto] = useState(false);
   const [modalAreas, setModalAreas] = useState(false);
   const [modalArchivo, setModalArchivo] = useState(false);
+  const [modalRondas, setModalRondas] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorArea
             Por {zona.etiquetaAreas.toLowerCase()}… <small>{zona.corto}</small>
           </button>
           <button type="button" onClick={item(onAvenidas)}>Modo Avenidas <small>CABA</small></button>
+          <button type="button" onClick={item(() => setModalRondas(true))}>Cómo llegar (A→B) <small>subte+tren</small></button>
           <button type="button" onClick={item(() => setModalArchivo(true))}>Archivo <small>días pasados</small></button>
         </div>
       )}
@@ -88,6 +91,35 @@ export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorArea
             onArchivo(dia);
           }}
         />
+      )}
+      {modalRondas && (
+        <div className="modal-fondo" onClick={() => setModalRondas(false)}>
+          <div className="modal modal-rondas" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-encabezado">
+              <span>Cómo llegar (A→B)</span>
+              <button type="button" className="modal-cerrar" onClick={() => setModalRondas(false)}>✕</button>
+            </div>
+            <p className="modal-texto">
+              Te damos un punto A y un punto B de la red de subtes y trenes: elegí el itinerario más rápido.
+              ¿Cuántas rondas jugás?
+            </p>
+            <div className="rondas-opciones">
+              {TANDAS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className="btn-primario"
+                  onClick={() => {
+                    setModalRondas(false);
+                    onTransporte(n);
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

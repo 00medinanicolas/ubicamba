@@ -1,8 +1,10 @@
 import type { Avenida, Esquina, Juego, ZonaId } from './tipos';
 import { esZonaId } from './zonas';
 
+/** Tanda base: las partidas se arman en múltiplos de 5 rondas (5, 10, 15, 20). */
 export const RONDAS = 5;
-export const PUNTOS_MAX = RONDAS * 100;
+export const TANDAS = [5, 10, 15, 20];
+export const MAX_RONDAS = 40;
 
 /** Época del "mapa del día" (UTC). Cambiarla reinicia la numeración de días. */
 const EPOCA = Date.UTC(2026, 0, 1);
@@ -116,6 +118,7 @@ export function urlCompartir(
   const p = new URLSearchParams();
   if (opts.zona !== 'caba') p.set('z', opts.zona);
   if (opts.juego === 'avenidas') p.set('j', 'av');
+  if (opts.juego === 'transporte') p.set('j', 'tr');
   p.set('e', indices.map((i) => i + 1).join('-'));
   if (opts.areas?.length) p.set('areas', opts.areas.join('-'));
   return '?' + p.toString();
@@ -126,13 +129,15 @@ export function parseURL(): ParamsPartida {
   const p = new URLSearchParams(window.location.search);
   const z = p.get('z');
   const zona: ZonaId = esZonaId(z) ? z : 'caba';
-  const juego: Juego = p.get('j') === 'av' ? 'avenidas' : 'esquinas';
+  const j = p.get('j');
+  const juego: Juego = j === 'av' ? 'avenidas' : j === 'tr' ? 'transporte' : 'esquinas';
 
   let indices: number[] | null = null;
   const e = p.get('e');
   if (e) {
     const partes = e.split('-').map(Number);
-    if (partes.length === RONDAS && partes.every((n) => Number.isInteger(n) && n >= 1)) {
+    const largoValido = partes.length >= RONDAS && partes.length <= MAX_RONDAS && partes.length % RONDAS === 0;
+    if (largoValido && partes.every((n) => Number.isInteger(n) && n >= 1)) {
       indices = partes.map((n) => n - 1);
     }
   }
@@ -144,5 +149,7 @@ export function parseURL(): ParamsPartida {
     if (ids.length && ids.every((n) => Number.isInteger(n) && n >= 1)) areasParam = ids;
   }
 
-  return { zona, juego: juego === 'avenidas' && zona !== 'caba' ? 'esquinas' : juego, indices, areasParam };
+  // avenidas y transporte son juegos de red completa: siempre parten de la vista CABA
+  const juegoFinal: Juego = juego !== 'esquinas' && zona !== 'caba' ? 'esquinas' : juego;
+  return { zona: juego === 'transporte' ? 'caba' : zona, juego: juegoFinal, indices, areasParam };
 }

@@ -12,6 +12,12 @@ export interface PinResultado {
   etiqueta: string; // "R1"…"R5"
 }
 
+export interface MarcadorAB {
+  latlng: [number, number];
+  etiqueta: string;
+  color: string;
+}
+
 interface Props {
   zona: ZonaDef;
   basemap: Basemap;
@@ -20,8 +26,12 @@ interface Props {
   onPick: (latlng: [number, number]) => void;
   verComunas: boolean;
   verAreas: boolean;
-  /** geometría destacada (modo Avenidas); null = nada */
+  /** geometría destacada (modo Avenidas / ruta óptima de transporte); null = nada */
   destacado: GeoJSON.FeatureCollection | null;
+  /** segunda geometría (la opción elegida cuando no fue la óptima), en rojo punteado */
+  trazadoMalo: GeoJSON.FeatureCollection | null;
+  /** marcadores A/B del modo transporte; al setearse la vista se amplía al AMBA */
+  marcadoresAB: MarcadorAB[] | null;
 }
 
 // caché de overlays descargados (por URL, vive toda la sesión)
@@ -41,13 +51,14 @@ function puntoDiv(fondo: string, borde: string): HTMLDivElement {
   return el;
 }
 
-function pinRespuesta(etiqueta: string): HTMLDivElement {
+function pinRespuesta(etiqueta: string, color = '#ef4444', borde = '#b91c1c'): HTMLDivElement {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px';
   const chip = document.createElement('div');
   chip.textContent = etiqueta;
   chip.className = 'pin-etiqueta';
-  wrap.append(chip, puntoDiv('#ef4444', '#b91c1c'));
+  chip.style.borderColor = color;
+  wrap.append(chip, puntoDiv(color, borde));
   return wrap;
 }
 
@@ -71,6 +82,8 @@ function bboxDeFC(fc: GeoJSON.FeatureCollection): [[number, number], [number, nu
   return alguno ? [[minX, minY], [maxX, maxY]] : null;
 }
 
+const LIMITES_AMBA: [[number, number], [number, number]] = [[-59.35, -35.25], [-57.65, -34.05]];
+
 export default function GameMap({
   zona,
   basemap,
@@ -80,10 +93,13 @@ export default function GameMap({
   verComunas,
   verAreas,
   destacado,
+  trazadoMalo,
+  marcadoresAB,
 }: Props) {
   const contRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<MapaML | null>(null);
   const marcadoresRef = useRef<maplibregl.Marker[]>([]);
+  const marcadoresABRef = useRef<maplibregl.Marker[]>([]);
   const listoRef = useRef(false);
   const capasOverlayRef = useRef<string[]>([]);
 
@@ -94,12 +110,14 @@ export default function GameMap({
   const areasRef = useRef(verAreas);
   const zonaRef = useRef(zona);
   const destacadoRef = useRef(destacado);
+  const trazadoMaloRef = useRef(trazadoMalo);
   clickRef.current = clickHabilitado;
   pickRef.current = onPick;
   resultadosRef.current = resultados;
   comunasRef.current = verComunas;
   areasRef.current = verAreas;
   destacadoRef.current = destacado;
+  trazadoMaloRef.current = trazadoMalo;
 
   useEffect(() => {
     let cancelado = false;
@@ -165,6 +183,16 @@ export default function GameMap({
           source: 'destacado',
           layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: { 'line-color': '#4cc2ff', 'line-width': 4 },
+        });
+      }
+      if (!mapa.getSource('trazado-malo')) {
+        mapa.addSource('trazado-malo', { type: 'geojson', data: trazadoMaloRef.current ?? FC_VACIA });
+        mapa.addLayer({
+          id: 'trazado-malo-linea',
+          type: 'line',
+          source: 'trazado-malo',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#ef4444', 'line-width': 3, 'line-dasharray': [1.5, 1.5] },
         });
       }
       capasOverlayRef.current = [];
@@ -287,17 +315,51 @@ export default function GameMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zona]);
 
-  // geometría destacada (modo Avenidas)
+  // geometría destacada (modo Avenidas / ruta óptima)
   useEffect(() => {
     const mapa = mapaRef.current;
     if (!mapa || !listoRef.current) return;
     (mapa.getSource('destacado') as GeoJSONSource | undefined)?.setData(destacado ?? FC_VACIA);
-    if (destacado) {
+    if (destacado && !marcadoresAB) {
       const bbox = bboxDeFC(destacado);
       if (bbox) mapa.fitBounds(bbox, { padding: 60, duration: 700, maxZoom: 14.5 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [destacado]);
+
+  // trazado de la opción elegida (cuando no fue la óptima)
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listoRef.current) return;
+    (mapa.getSource('trazado-malo') as GeoJSONSource | undefined)?.setData(trazadoMalo ?? FC_VACIA);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trazadoMalo]);
+
+  // marcadores A/B del modo transporte (amplían la vista al AMBA)
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+    marcadoresABRef.current.forEach((m) => m.remove());
+    marcadoresABRef.current = [];
+    if (marcadoresAB?.length) {
+      mapa.setMaxBounds(LIMITES_AMBA);
+      for (const m of marcadoresAB) {
+        const marker = new maplibregl.Marker({ element: pinRespuesta(m.etiqueta, m.color, m.color), anchor: 'bottom' })
+          .setLngLat([m.latlng[1], m.latlng[0]])
+          .addTo(mapa);
+        marcadoresABRef.current.push(marker);
+      }
+      let minX = 180, minY = 90, maxX = -180, maxY = -90;
+      for (const m of marcadoresAB) {
+        minX = Math.min(minX, m.latlng[1]); maxX = Math.max(maxX, m.latlng[1]);
+        minY = Math.min(minY, m.latlng[0]); maxY = Math.max(maxY, m.latlng[0]);
+      }
+      mapa.fitBounds([[minX, minY], [maxX, maxY]], { padding: 80, duration: 700, maxZoom: 13 });
+    } else {
+      mapa.setMaxBounds(zonaRef.current.limites);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marcadoresAB]);
 
   // cambio de mapa base (plano ⇄ satélite)
   const basemapPrevio = useRef(basemap);

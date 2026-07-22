@@ -1,4 +1,4 @@
-import type { Avenida, DatosZona, ZonaId } from './tipos';
+import type { Avenida, DatosTransporte, DatosZona, ZonaId } from './tipos';
 
 /** Resuelve rutas de assets respetando el base de Vite (en Pages la app vive bajo /ubicamba/). */
 export const ruta = (p: string) => import.meta.env.BASE_URL + p.replace(/^\//, '');
@@ -16,6 +16,19 @@ export function cargarZona(zona: ZonaId): Promise<DatosZona> {
     cacheZonas.set(zona, p);
   }
   return p;
+}
+
+let cacheTransporte: Promise<DatosTransporte> | null = null;
+
+export function cargarTransporte(): Promise<DatosTransporte> {
+  if (!cacheTransporte) {
+    cacheTransporte = fetch(ruta('data/transporte-v1.json')).then((r) => {
+      if (!r.ok) throw new Error(`No se pudo cargar el dataset de transporte (${r.status})`);
+      return r.json() as Promise<DatosTransporte>;
+    });
+    cacheTransporte.catch(() => (cacheTransporte = null));
+  }
+  return cacheTransporte;
 }
 
 let cacheAvenidas: Promise<Avenida[]> | null = null;

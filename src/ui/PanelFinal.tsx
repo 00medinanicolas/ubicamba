@@ -1,5 +1,3 @@
-import { PUNTOS_MAX } from '../game/logica';
-
 export interface FilaFinal {
   etiqueta: string;
   titulo: string;
@@ -24,7 +22,7 @@ export default function PanelFinal({ filas, total, copiado, onCompartir, onNueva
   return (
     <div className="panel-final">
       <div className="final-titulo">
-        ¡Terminaste! <strong>{total}</strong> / {PUNTOS_MAX} puntos
+        ¡Terminaste! <strong>{total}</strong> / {filas.length * 100} puntos
       </div>
       <ul className="desglose">
         {filas.map((f) => (

@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Avenida, DatosZona, Juego, Modo, Resultado, Sesion, ZonaId } from './game/tipos';
+import type {
+  Avenida,
+  DatosTransporte,
+  DatosZona,
+  Juego,
+  LegTransporte,
+  Modo,
+  Resultado,
+  Sesion,
+  ZonaId,
+} from './game/tipos';
 import {
   RONDAS,
   distanciaM,
@@ -14,10 +24,10 @@ import {
   puntosPorDistancia,
   urlCompartir,
 } from './game/logica';
-import { cargarAvenidas, cargarZona } from './game/datos';
+import { cargarAvenidas, cargarTransporte, cargarZona } from './game/datos';
 import { cargarSesion, guardarSesion, mismosIndices } from './game/sesion';
 import { ZONAS } from './game/zonas';
-import GameMap, { type PinResultado } from './map/GameMap';
+import GameMap, { type MarcadorAB, type PinResultado } from './map/GameMap';
 import type { Basemap } from './map/basemap';
 import Menu, { colorComuna } from './ui/Menu';
 import PanelFinal, { formatoDistancia, type FilaFinal } from './ui/PanelFinal';
@@ -44,9 +54,23 @@ function aplicarURL(s: Sesion) {
   window.history.replaceState(null, '', url);
 }
 
+function legsAFC(legs: LegTransporte[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: legs
+      .filter((l) => l.puntos.length >= 2)
+      .map((l) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: l.puntos },
+      })),
+  };
+}
+
 export default function App() {
   const [datos, setDatos] = useState<DatosZona | null>(null);
   const [avenidas, setAvenidas] = useState<Avenida[] | null>(null);
+  const [transporte, setTransporte] = useState<DatosTransporte | null>(null);
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
@@ -61,9 +85,14 @@ export default function App() {
         const p = parseURL();
         const d = await cargarZona(p.zona);
         let avs: Avenida[] | null = null;
+        let tr: DatosTransporte | null = null;
         let s: Sesion;
 
-        if (p.juego === 'avenidas') {
+        if (p.juego === 'transporte') {
+          tr = await cargarTransporte();
+          const validos = p.indices && p.indices.every((i) => i < tr!.desafios.length);
+          s = sesionBase('caba', 'transporte', validos ? p.indices! : indicesAlAzar(tr.desafios.length), 'link', []);
+        } else if (p.juego === 'avenidas') {
           avs = await cargarAvenidas();
           const validos = p.indices && p.indices.every((i) => i < avs!.length);
           s = sesionBase('caba', 'avenidas', validos ? p.indices! : indicesAlAzar(avs.length), 'link', []);
@@ -102,6 +131,7 @@ export default function App() {
         aplicarURL(s);
         setDatos(d);
         setAvenidas(avs);
+        setTransporte(tr);
         setSesion(s);
       } catch (e) {
         setErrorCarga(e instanceof Error ? e.message : String(e));
@@ -122,11 +152,14 @@ export default function App() {
   }, [sesion?.fase, sesion?.ronda]);
 
   // ---------- helpers de partida ----------
-  function empezar(s: Sesion, d: DatosZona, avs: Avenida[] | null) {
+  const totalRondas = sesion?.indices.length ?? RONDAS;
+
+  function empezar(s: Sesion, d: DatosZona, avs: Avenida[] | null, tr: DatosTransporte | null) {
     aplicarURL(s);
     setCopiado(false);
     setDatos(d);
     if (avs) setAvenidas(avs);
+    if (tr) setTransporte(tr);
     setSesion(s);
   }
 
@@ -136,37 +169,58 @@ export default function App() {
       z === 'caba'
         ? sesionBase('caba', 'esquinas', indicesDelDia(numeroDia(new Date()), d.esquinas.length), 'dia', [])
         : sesionBase(z, 'esquinas', indicesAlAzar(d.esquinas.length), 'link', []);
-    empezar(s, d, null);
+    empezar(s, d, null, null);
   }
 
   async function irAlDia(dia: number, modo: Modo) {
     const d = await cargarZona('caba');
-    empezar(sesionBase('caba', 'esquinas', indicesDelDia(dia, d.esquinas.length), modo, []), d, null);
+    empezar(sesionBase('caba', 'esquinas', indicesDelDia(dia, d.esquinas.length), modo, []), d, null, null);
   }
 
   function practicaLibre() {
     if (!datos || !sesion) return;
-    if (sesion.juego === 'avenidas' && avenidas) {
-      empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avenidas.length), 'link', []), datos, avenidas);
+    if (sesion.juego === 'transporte' && transporte) {
+      empezar(
+        sesionBase('caba', 'transporte', indicesAlAzar(transporte.desafios.length, sesion.indices.length), 'link', []),
+        datos,
+        null,
+        transporte
+      );
       return;
     }
-    empezar(sesionBase(sesion.zona, 'esquinas', indicesAlAzar(datos.esquinas.length), 'link', []), datos, null);
+    if (sesion.juego === 'avenidas' && avenidas) {
+      empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avenidas.length), 'link', []), datos, avenidas, null);
+      return;
+    }
+    empezar(sesionBase(sesion.zona, 'esquinas', indicesAlAzar(datos.esquinas.length), 'link', []), datos, null, null);
   }
 
   function porAreas(ids: number[]) {
     if (!datos || !sesion) return;
-    empezar(sesionBase(sesion.zona, 'esquinas', indicesPorAreas(datos.esquinas, ids), 'personalizada', ids), datos, null);
+    empezar(sesionBase(sesion.zona, 'esquinas', indicesPorAreas(datos.esquinas, ids), 'personalizada', ids), datos, null, null);
   }
 
   async function modoAvenidas() {
     const [d, avs] = await Promise.all([cargarZona('caba'), cargarAvenidas()]);
-    empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avs.length), 'link', []), d, avs);
+    empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avs.length), 'link', []), d, avs, null);
+  }
+
+  async function modoTransporte(rondas: number) {
+    const [d, tr] = await Promise.all([cargarZona('caba'), cargarTransporte()]);
+    empezar(
+      sesionBase('caba', 'transporte', indicesAlAzar(tr.desafios.length, Math.min(rondas, tr.desafios.length)), 'link', []),
+      d,
+      null,
+      tr
+    );
   }
 
   function avanzar() {
     setSesion((s) => {
       if (!s || s.fase !== 'revelada') return s;
-      return s.ronda + 1 >= RONDAS ? { ...s, fase: 'terminado' } : { ...s, ronda: s.ronda + 1, fase: 'adivinando' };
+      return s.ronda + 1 >= s.indices.length
+        ? { ...s, fase: 'terminado' }
+        : { ...s, ronda: s.ronda + 1, fase: 'adivinando' };
     });
   }
 
@@ -187,30 +241,71 @@ export default function App() {
     setSesion((s) => (s ? { ...s, fase: 'revelada', resultados: [...s.resultados, r] } : s));
   }
 
+  function manejarItinerario(opcionIdx: number) {
+    if (!sesion || !transporte || sesion.fase !== 'adivinando' || sesion.juego !== 'transporte') return;
+    const idx = sesion.indices[sesion.ronda];
+    const desafio = transporte.desafios[idx];
+    const elegida = desafio.opciones[opcionIdx];
+    const optima = desafio.opciones.find((o) => o.optima)!;
+    const puntos = elegida.optima ? 100 : Math.max(0, 100 - 3 * (elegida.minutos - optima.minutos));
+    const r: Resultado = { idx, guess: null, eleccion: String(opcionIdx), distancia: 0, puntos };
+    setSesion((s) => (s ? { ...s, fase: 'revelada', resultados: [...s.resultados, r] } : s));
+  }
+
   // ---------- derivados ----------
   const zona = ZONAS[sesion?.zona ?? 'caba'];
-  const esAvenidas = sesion?.juego === 'avenidas';
+  const juego = sesion?.juego ?? 'esquinas';
 
-  const esquinaActual = !esAvenidas && sesion && datos ? datos.esquinas[sesion.indices[sesion.ronda]] : null;
-  const avenidaActual = esAvenidas && sesion && avenidas ? avenidas[sesion.indices[sesion.ronda]] : null;
+  const esquinaActual = juego === 'esquinas' && sesion && datos ? datos.esquinas[sesion.indices[sesion.ronda]] : null;
+  const avenidaActual = juego === 'avenidas' && sesion && avenidas ? avenidas[sesion.indices[sesion.ronda]] : null;
+  const desafioActual =
+    juego === 'transporte' && sesion && transporte && sesion.fase !== 'terminado'
+      ? transporte.desafios[sesion.indices[sesion.ronda]]
+      : null;
 
   const opciones = useMemo(
-    () => (esAvenidas && sesion && avenidas && sesion.fase !== 'terminado' ? opcionesAvenida(avenidas, sesion.indices[sesion.ronda]) : []),
+    () =>
+      juego === 'avenidas' && sesion && avenidas && sesion.fase !== 'terminado'
+        ? opcionesAvenida(avenidas, sesion.indices[sesion.ronda])
+        : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [esAvenidas, sesion?.ronda, sesion?.indices, avenidas]
+    [juego, sesion?.ronda, sesion?.indices, avenidas]
   );
 
+  const ultimo = sesion?.resultados[sesion.resultados.length - 1];
+
   const destacado = useMemo<GeoJSON.FeatureCollection | null>(() => {
-    if (!avenidaActual || sesion?.fase === 'terminado') return null;
-    return {
-      type: 'FeatureCollection',
-      features: avenidaActual.lineas.map((l) => ({
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: l },
-      })),
-    };
-  }, [avenidaActual, sesion?.fase]);
+    if (avenidaActual && sesion?.fase !== 'terminado') {
+      return {
+        type: 'FeatureCollection',
+        features: avenidaActual.lineas.map((l) => ({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'LineString', coordinates: l },
+        })),
+      };
+    }
+    if (desafioActual && sesion?.fase === 'revelada') {
+      return legsAFC(desafioActual.opciones.find((o) => o.optima)!.legs);
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avenidaActual, desafioActual, sesion?.fase]);
+
+  const trazadoMalo = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!desafioActual || sesion?.fase !== 'revelada' || !ultimo?.eleccion) return null;
+    const elegida = desafioActual.opciones[+ultimo.eleccion];
+    return elegida.optima ? null : legsAFC(elegida.legs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desafioActual, sesion?.fase, ultimo]);
+
+  const marcadoresAB = useMemo<MarcadorAB[] | null>(() => {
+    if (!desafioActual) return null;
+    return [
+      { latlng: [desafioActual.origen.lat, desafioActual.origen.lng], etiqueta: 'A', color: '#22c55e' },
+      { latlng: [desafioActual.destino.lat, desafioActual.destino.lng], etiqueta: 'B', color: '#ef4444' },
+    ];
+  }, [desafioActual]);
 
   const pins: PinResultado[] = useMemo(() => {
     if (!sesion || !datos || sesion.juego !== 'esquinas') return [];
@@ -221,13 +316,13 @@ export default function App() {
   }, [sesion, datos]);
 
   const total = sesion?.resultados.reduce((acc, r) => acc + r.puntos, 0) ?? 0;
-  const ultimo = sesion?.resultados[sesion.resultados.length - 1];
 
   function areaDe(idx: number) {
     return datos!.areas[datos!.esquinas[idx].b - 1];
   }
 
   function tituloPartida(s: Sesion): string {
+    if (s.juego === 'transporte') return 'Cómo llegar (A→B)';
     if (s.juego === 'avenidas') return 'Modo Avenidas';
     if (s.modo === 'dia') {
       return `Mapa del día · ${new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}`;
@@ -248,7 +343,7 @@ export default function App() {
       juego: sesion.juego,
       areas: sesion.modo === 'personalizada' ? sesion.areasSel : undefined,
     })}`;
-    const texto = `🧭 UbicAMBA — ${tituloPartida(sesion)}\n${lineaPuntos}\nTotal: ${total}/${RONDAS * 100}\nJugala vos: ${link}`;
+    const texto = `🧭 UbicAMBA — ${tituloPartida(sesion)}\n${lineaPuntos}\nTotal: ${total}/${sesion.indices.length * 100}\nJugala vos: ${link}`;
     try {
       await navigator.clipboard.writeText(texto);
       setCopiado(true);
@@ -262,6 +357,17 @@ export default function App() {
     if (!sesion || !datos) return [];
     return sesion.resultados.map((r, i) => {
       const etiqueta = `R${i + 1}`;
+      if (sesion.juego === 'transporte' && transporte) {
+        const d = transporte.desafios[r.idx];
+        const optima = d.opciones.find((o) => o.optima)!;
+        const ok = r.puntos === 100;
+        return {
+          etiqueta,
+          titulo: `${d.origen.nombre} → ${d.destino.nombre}`,
+          sub: optima.legs.map((l) => l.linea).join(' → '),
+          resultado: ok ? '✔ 100 pts' : `${r.puntos} pts`,
+        };
+      }
       if (sesion.juego === 'avenidas' && avenidas) {
         const av = avenidas[r.idx];
         const ok = r.puntos === 100;
@@ -283,7 +389,7 @@ export default function App() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sesion, datos, avenidas]);
+  }, [sesion, datos, avenidas, transporte]);
 
   // ---------- render ----------
   if (errorCarga) {
@@ -298,20 +404,26 @@ export default function App() {
     return <div className="pantalla-carga">🧭 Cargando UbicAMBA…</div>;
   }
 
-  const areaReveal = ultimo && sesion.juego === 'esquinas' ? areaDe(ultimo.idx) : null;
-  const avenidaReveal = ultimo && sesion.juego === 'avenidas' && avenidas ? avenidas[ultimo.idx] : null;
+  const areaReveal = ultimo && juego === 'esquinas' ? areaDe(ultimo.idx) : null;
+  const avenidaReveal = ultimo && juego === 'avenidas' && avenidas ? avenidas[ultimo.idx] : null;
+  const transporteReveal =
+    ultimo && juego === 'transporte' && transporte && sesion.fase === 'revelada'
+      ? transporte.desafios[ultimo.idx]
+      : null;
+
+  const iconoRed = (red: 'subte' | 'tren') => (red === 'subte' ? '🚇' : '🚆');
 
   return (
     <div className="app">
       <header className="hud">
         <div className="hud-fila">
           <span className="marca">
-            🧭 UbicAMBA <small className="marca-sub">{zona.corto}</small>
+            🧭 UbicAMBA <small className="marca-sub">{juego === 'transporte' ? 'A→B' : zona.corto}</small>
           </span>
           {sesion.fase === 'terminado' ? (
             <span className="ronda">¡Juego terminado!</span>
           ) : (
-            <span className="ronda">Ronda {sesion.ronda + 1} / {RONDAS}</span>
+            <span className="ronda">Ronda {sesion.ronda + 1} / {totalRondas}</span>
           )}
           <Menu
             zona={zona}
@@ -321,13 +433,19 @@ export default function App() {
             onPractica={practicaLibre}
             onPorAreas={porAreas}
             onAvenidas={modoAvenidas}
+            onTransporte={modoTransporte}
             onArchivo={(dia) => irAlDia(dia, 'link')}
           />
           <span className="puntaje">Puntaje: {total}</span>
         </div>
         {sesion.fase !== 'terminado' && (
           <div className="consigna">
-            {esAvenidas ? (
+            {juego === 'transporte' && desafioActual ? (
+              <>
+                ¿Cómo conviene ir de {iconoRed(desafioActual.origen.red)} <strong>{desafioActual.origen.nombre}</strong> a{' '}
+                {iconoRed(desafioActual.destino.red)} <strong>{desafioActual.destino.nombre}</strong>?
+              </>
+            ) : juego === 'avenidas' ? (
               <>¿Qué avenida es la <strong>marcada en celeste</strong>?</>
             ) : (
               esquinaActual && (
@@ -346,11 +464,13 @@ export default function App() {
           zona={zona}
           basemap={basemap}
           resultados={pins}
-          clickHabilitado={sesion.fase === 'adivinando' && sesion.juego === 'esquinas'}
+          clickHabilitado={sesion.fase === 'adivinando' && juego === 'esquinas'}
           onPick={manejarPick}
           verComunas={verComunas}
           verAreas={verAreas}
           destacado={destacado}
+          trazadoMalo={trazadoMalo}
+          marcadoresAB={marcadoresAB}
         />
         <div className="controles-mapa">
           {zona.overlays.some((o) => o.grupo === 'comunas') && (
@@ -382,14 +502,34 @@ export default function App() {
       </div>
 
       <footer className="pie">
-        {sesion.fase === 'adivinando' && !esAvenidas && (
+        {sesion.fase === 'adivinando' && juego === 'esquinas' && (
           <span className="pista">Tocá el mapa donde creés que está la esquina</span>
         )}
-        {sesion.fase === 'adivinando' && esAvenidas && (
+        {sesion.fase === 'adivinando' && juego === 'avenidas' && (
           <div className="opciones">
             {opciones.map((op) => (
               <button key={op} type="button" className="btn-opcion" onClick={() => manejarOpcion(op)}>
                 {op}
+              </button>
+            ))}
+          </div>
+        )}
+        {sesion.fase === 'adivinando' && juego === 'transporte' && desafioActual && (
+          <div className="opciones opciones-transporte">
+            {desafioActual.opciones.map((op, i) => (
+              <button key={i} type="button" className="btn-opcion btn-itinerario" onClick={() => manejarItinerario(i)}>
+                <span className="itinerario-legs">
+                  {op.legs.map((l, j) => (
+                    <span key={j} className="leg-chip" style={{ '--color-leg': l.color } as React.CSSProperties}>
+                      {l.tipo === 'caminar' ? '🚶' : iconoRed(l.tipo)} {l.linea}
+                      {l.paradas > 0 && <small> ·{l.paradas}</small>}
+                    </span>
+                  ))}
+                </span>
+                <small className="itinerario-transbordos">
+                  {op.legs.filter((l) => l.tipo !== 'caminar').length - 1} transbordo
+                  {op.legs.filter((l) => l.tipo !== 'caminar').length - 1 === 1 ? '' : 's'}
+                </small>
               </button>
             ))}
           </div>
@@ -407,7 +547,7 @@ export default function App() {
             <div className="ficha-resultado">
               Te equivocaste por {formatoDistancia(ultimo.distancia)} — <strong>{ultimo.puntos} pts</strong>
               <button type="button" className="btn-primario btn-siguiente" onClick={avanzar}>
-                {sesion.ronda + 1 >= RONDAS ? 'Ver resultado' : 'Siguiente →'}
+                {sesion.ronda + 1 >= totalRondas ? 'Ver resultado' : 'Siguiente →'}
               </button>
             </div>
           </div>
@@ -423,7 +563,34 @@ export default function App() {
             <div className="ficha-resultado">
               <strong>{ultimo.puntos} pts</strong>
               <button type="button" className="btn-primario btn-siguiente" onClick={avanzar}>
-                {sesion.ronda + 1 >= RONDAS ? 'Ver resultado' : 'Siguiente →'}
+                {sesion.ronda + 1 >= totalRondas ? 'Ver resultado' : 'Siguiente →'}
+              </button>
+            </div>
+          </div>
+        )}
+        {transporteReveal && ultimo && (
+          <div className="ficha">
+            <div className="ficha-dato">
+              {(() => {
+                const elegida = transporteReveal.opciones[+ultimo.eleccion!];
+                const optima = transporteReveal.opciones.find((o) => o.optima)!;
+                return elegida.optima ? (
+                  <>
+                    ✔ ¡La más rápida! <strong>{optima.minutos} min</strong>:{' '}
+                    {optima.legs.map((l) => l.linea).join(' → ')}
+                  </>
+                ) : (
+                  <>
+                    ✘ La tuya tardaba <strong>{elegida.minutos} min</strong>; la mejor era{' '}
+                    <strong>{optima.minutos} min</strong>: {optima.legs.map((l) => l.linea).join(' → ')}
+                  </>
+                );
+              })()}
+            </div>
+            <div className="ficha-resultado">
+              <strong>{ultimo.puntos} pts</strong>
+              <button type="button" className="btn-primario btn-siguiente" onClick={avanzar}>
+                {sesion.ronda + 1 >= totalRondas ? 'Ver resultado' : 'Siguiente →'}
               </button>
             </div>
           </div>

@@ -14,10 +14,11 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-## Regenerar el dataset
+## Regenerar los datasets
 
 ```bash
-npm run dataset
+npm run dataset      # esquinas + overlays + avenidas (OSM + BA Data + IGN)
+node scripts/build-transporte.mjs   # desafíos A→B (GTFS subte+tren extraídos en data-src/gtfs/)
 ```
 
 Descarga las calles de OpenStreetMap (Overpass, se cachea en `data-src/`), detecta ~15.500 esquinas reales,
@@ -62,6 +63,11 @@ les asigna barrio y comuna con los polígonos oficiales de BA Data, balancea por
   90 avenidas principales de CABA rankeadas por longitud; la ficha cuenta qué barrios recorre.
   Las opciones son determinísticas por avenida → los links compartidos son desafíos idénticos.
 - **Archivo**: calendario para jugar cualquier mapa del día pasado (desde el 1/1/2026).
+- **Cómo llegar A→B** (`?j=tr`): te dan dos estaciones de la red de subtes y trenes y hay que elegir
+  el itinerario más rápido entre varios (sin ver los tiempos). Calculado con Dijkstra sobre los GTFS
+  oficiales: tiempos reales de viaje, esperas por frecuencia y transbordos. Rondas configurables en
+  tandas de 5 (5/10/15/20). El dataset es versionado y regenerable: al sumar los colectivos (GTFS ya
+  descargado, requiere credenciales de API Transporte) se recalculan todas las rutas.
 
 ## Roadmap
 
