@@ -18,7 +18,7 @@ interface Props {
   onPractica: () => void;
   onPorAreas: (ids: number[]) => void;
   onAvenidas: () => void;
-  onTransporte: (rondas: number) => void;
+  onTransporte: (rondas: number, mecanica: 'elegir' | 'armar') => void;
   onArchivo: (dia: number) => void;
 }
 
@@ -27,6 +27,7 @@ export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorArea
   const [modalAreas, setModalAreas] = useState(false);
   const [modalArchivo, setModalArchivo] = useState(false);
   const [modalRondas, setModalRondas] = useState(false);
+  const [mecanica, setMecanica] = useState<'elegir' | 'armar'>('elegir');
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -100,9 +101,27 @@ export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorArea
               <button type="button" className="modal-cerrar" onClick={() => setModalRondas(false)}>✕</button>
             </div>
             <p className="modal-texto">
-              Te damos un punto A y un punto B de la red de subtes y trenes: elegí el itinerario más rápido.
-              ¿Cuántas rondas jugás?
+              Te damos un punto A y un punto B de la red de subtes y trenes. ¿Cómo jugás?
             </p>
+            <div className="mecanica-opciones">
+              <button
+                type="button"
+                className={`btn-mecanica${mecanica === 'elegir' ? ' activo' : ''}`}
+                onClick={() => setMecanica('elegir')}
+              >
+                🃏 Elegí el itinerario
+                <small>te mostramos 3-4 opciones, marcá la más rápida</small>
+              </button>
+              <button
+                type="button"
+                className={`btn-mecanica${mecanica === 'armar' ? ' activo' : ''}`}
+                onClick={() => setMecanica('armar')}
+              >
+                🧩 Armá tu viaje
+                <small>construilo paso a paso: líneas, transbordos, caminatas</small>
+              </button>
+            </div>
+            <p className="modal-texto">¿Cuántas rondas?</p>
             <div className="rondas-opciones">
               {TANDAS.map((n) => (
                 <button
@@ -111,7 +130,7 @@ export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorArea
                   className="btn-primario"
                   onClick={() => {
                     setModalRondas(false);
-                    onTransporte(n);
+                    onTransporte(n, mecanica);
                   }}
                 >
                   {n}

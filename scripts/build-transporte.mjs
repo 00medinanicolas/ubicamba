@@ -456,6 +456,44 @@ function generarOpciones(origen, destino) {
   return candidatas.slice(0, 4).map((c) => empaquetar(c.ruta, c.optima));
 }
 
+// ---------- red navegable para la mecánica "armá tu viaje" ----------
+const listaEstaciones = [...estaciones.values()];
+const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
+{
+  const caminatasOut = [];
+  const vistas = new Set();
+  for (const [a, vecinos] of vecinosCaminando) {
+    for (const v of vecinos) {
+      const ia = idxDe.get(a), ib = idxDe.get(v.a);
+      const clave = ia < ib ? `${ia}-${ib}` : `${ib}-${ia}`;
+      if (vistas.has(clave)) continue;
+      vistas.add(clave);
+      caminatasOut.push([ia, ib, +v.min.toFixed(1)]);
+    }
+  }
+  const red = {
+    version: VERSION,
+    penalBajar: PENAL_BAJAR,
+    estaciones: listaEstaciones.map((e) => ({
+      n: e.nombre,
+      r: e.red,
+      lat: +e.lat.toFixed(5),
+      lng: +e.lng.toFixed(5),
+    })),
+    lineas: lineas.map((l) => ({
+      nombre: l.nombre,
+      color: l.color,
+      red: l.red,
+      espera: +l.espera.toFixed(1),
+      sec: l.secuencia.map((id) => idxDe.get(id)),
+      hops: l.hops.map((h) => +h.toFixed(1)),
+    })),
+    caminatas: caminatasOut,
+  };
+  writeFileSync(join(ROOT, 'public', 'data', 'red-v1.json'), JSON.stringify(red));
+  console.log(`Red navegable: ${red.estaciones.length} estaciones, ${red.lineas.length} patrones, ${caminatasOut.length} caminatas`);
+}
+
 const BBOX = { latMin: -35.05, latMax: -34.25, lngMin: -59.05, lngMax: -57.85 };
 const elegibles = [...estaciones.values()].filter(
   (e) => e.lat >= BBOX.latMin && e.lat <= BBOX.latMax && e.lng >= BBOX.lngMin && e.lng <= BBOX.lngMax
@@ -481,6 +519,8 @@ while (desafios.length < OBJETIVO_DESAFIOS && intentos < 4000) {
   desafios.push({
     origen: { nombre: a.nombre, red: a.red, lat: +a.lat.toFixed(5), lng: +a.lng.toFixed(5) },
     destino: { nombre: b.nombre, red: b.red, lat: +b.lat.toFixed(5), lng: +b.lng.toFixed(5) },
+    idxOrigen: idxDe.get(a.id),
+    idxDestino: idxDe.get(b.id),
     opciones,
   });
 }

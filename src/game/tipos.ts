@@ -1,6 +1,33 @@
 export type ZonaId = 'caba' | 'norte' | 'oeste' | 'sur';
 
-export type Juego = 'esquinas' | 'avenidas' | 'transporte';
+export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar';
+
+export interface RedEstacion {
+  n: string;
+  r: 'subte' | 'tren';
+  lat: number;
+  lng: number;
+}
+
+export interface RedLinea {
+  nombre: string;
+  color: string;
+  red: 'subte' | 'tren';
+  espera: number;
+  /** índices de estación en orden de recorrido */
+  sec: number[];
+  /** minutos entre estaciones consecutivas (largo = sec.length - 1) */
+  hops: number[];
+}
+
+export interface RedTransporte {
+  version: string;
+  penalBajar: number;
+  estaciones: RedEstacion[];
+  lineas: RedLinea[];
+  /** [idxA, idxB, minutos] (bidireccional) */
+  caminatas: [number, number, number][];
+}
 
 export interface LegTransporte {
   tipo: 'subte' | 'tren' | 'caminar';
@@ -30,6 +57,9 @@ export interface PuntoTransporte {
 export interface DesafioTransporte {
   origen: PuntoTransporte;
   destino: PuntoTransporte;
+  /** índices en red-v1.json (mecánica "armá tu viaje") */
+  idxOrigen: number;
+  idxDestino: number;
   opciones: OpcionTransporte[];
 }
 

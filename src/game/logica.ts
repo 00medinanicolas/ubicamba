@@ -119,6 +119,7 @@ export function urlCompartir(
   if (opts.zona !== 'caba') p.set('z', opts.zona);
   if (opts.juego === 'avenidas') p.set('j', 'av');
   if (opts.juego === 'transporte') p.set('j', 'tr');
+  if (opts.juego === 'armar') p.set('j', 'ar');
   p.set('e', indices.map((i) => i + 1).join('-'));
   if (opts.areas?.length) p.set('areas', opts.areas.join('-'));
   return '?' + p.toString();
@@ -130,7 +131,7 @@ export function parseURL(): ParamsPartida {
   const z = p.get('z');
   const zona: ZonaId = esZonaId(z) ? z : 'caba';
   const j = p.get('j');
-  const juego: Juego = j === 'av' ? 'avenidas' : j === 'tr' ? 'transporte' : 'esquinas';
+  const juego: Juego = j === 'av' ? 'avenidas' : j === 'tr' ? 'transporte' : j === 'ar' ? 'armar' : 'esquinas';
 
   let indices: number[] | null = null;
   const e = p.get('e');
