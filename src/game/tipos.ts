@@ -5,6 +5,7 @@ export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar';
 export interface RedEstacion {
   n: string;
   r: 'subte' | 'tren';
+  z: ZonaTransporte | null;
   lat: number;
   lng: number;
 }
@@ -29,16 +30,14 @@ export interface RedTransporte {
   caminatas: [number, number, number][];
 }
 
+export type ZonaTransporte = 'caba' | 'norte' | 'oeste' | 'sur';
+
+/** Tramo de un itinerario: `li` es el índice de línea en la red (-1 = a pie). */
 export interface LegTransporte {
-  tipo: 'subte' | 'tren' | 'caminar';
-  linea: string;
-  color: string;
-  desde: string | null;
-  hasta: string;
-  paradas: number;
+  li: number;
   min: number;
-  /** estaciones del tramo como [lng, lat] (vacío en caminatas) */
-  puntos: [number, number][];
+  /** índices de estación en red-v1.json */
+  est: number[];
 }
 
 export interface OpcionTransporte {
@@ -47,19 +46,16 @@ export interface OpcionTransporte {
   legs: LegTransporte[];
 }
 
-export interface PuntoTransporte {
-  nombre: string;
-  red: 'subte' | 'tren';
-  lat: number;
-  lng: number;
-}
-
 export interface DesafioTransporte {
-  origen: PuntoTransporte;
-  destino: PuntoTransporte;
-  /** índices en red-v1.json (mecánica "armá tu viaje") */
-  idxOrigen: number;
-  idxDestino: number;
+  /** índices de origen y destino en red-v1.json */
+  o: number;
+  d: number;
+  /** zonas que toca el viaje óptimo */
+  z: ZonaTransporte[];
+  /** combinaciones (transbordos) del viaje óptimo */
+  c: number;
+  /** sin alternativas suficientes: solo sirve para "armá tu viaje" */
+  soloArmar?: 1;
   opciones: OpcionTransporte[];
 }
 

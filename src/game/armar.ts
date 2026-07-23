@@ -130,17 +130,22 @@ export function deshacer(estado: EstadoArmado): EstadoArmado {
   };
 }
 
-export function fcDeLegs(red: RedTransporte, legs: LegArmado[]): GeoJSON.FeatureCollection {
+/** Dibuja cualquier lista de tramos (armados por el jugador o precomputados) sobre el mapa. */
+export function fcDeEst(
+  red: RedTransporte,
+  legs: { estaciones?: number[]; est?: number[] }[]
+): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: legs
-      .filter((l) => l.estaciones.length >= 2)
-      .map((l) => ({
+      .map((l) => l.estaciones ?? l.est ?? [])
+      .filter((est) => est.length >= 2)
+      .map((est) => ({
         type: 'Feature',
         properties: {},
         geometry: {
           type: 'LineString',
-          coordinates: l.estaciones.map((i) => [red.estaciones[i].lng, red.estaciones[i].lat]),
+          coordinates: est.map((i) => [red.estaciones[i].lng, red.estaciones[i].lat]),
         },
       })),
   };

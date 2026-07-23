@@ -15,15 +15,17 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { PARTIDOS_POR_ZONA, normalizarNombre } from './zonas-amba.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GTFS = join(ROOT, 'data-src', 'gtfs');
 const VERSION = 'subte-tren-v1';
 const SEED = 20260722;
 
-const OBJETIVO_DESAFIOS = 40;
-const MIN_MINUTOS = 20;
-const MAX_MINUTOS = 80;
+const CUPO_BUCKET = 8; // desafíos por (combinación de zonas × nivel de combinaciones)
+const TOPE_POR_ORIGEN = 3;
+const MIN_MINUTOS = 12;
+const MAX_MINUTOS = 95;
 const CAMINATA_MAX_M = 450;
 const VEL_CAMINATA = 1.15; // m/s
 const PENAL_BAJAR = 0.5; // min
@@ -69,6 +71,30 @@ function metros(a, b) {
   const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+function dentroDeAnillo(lng, lat, ring) {
+  let dentro = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+function dentroDePoligono(lng, lat, geom) {
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  for (const rings of polys) {
+    if (dentroDeAnillo(lng, lat, rings[0]) && !rings.slice(1).some((h) => dentroDeAnillo(lng, lat, h))) return true;
+  }
+  return false;
+}
+function bboxDeGeom(geom) {
+  let minX = 180, minY = 90, maxX = -180, maxY = -90;
+  const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+  for (const rings of polys) for (const [x, y] of rings[0]) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
 }
 function mulberry32(semilla) {
   let a = semilla >>> 0;
@@ -386,79 +412,128 @@ function firma(ruta) {
     .join('>');
 }
 
+/** Payload compacto: las estaciones van por índice y el cliente resuelve nombres/colores/coords desde red-v1.json. */
 function empaquetar(ruta, optima) {
-  const legsOut = [];
+  const legs = [];
   for (const l of ruta.legs) {
     if (l.tipo === 'caminar') {
-      const desde = legsOut.length ? legsOut[legsOut.length - 1].hasta : null;
-      legsOut.push({
-        tipo: 'caminar',
-        linea: 'a pie',
-        color: '#94a3b8',
-        desde,
-        hasta: estaciones.get(l.hasta).nombre,
-        paradas: 0,
-        min: Math.round(l.min),
-        puntos: [],
-      });
+      const previo = legs[legs.length - 1];
+      const hasta = idxDe.get(l.hasta);
+      if (previo && previo.li === -1) {
+        // dos caminatas seguidas se muestran como una sola
+        previo.min += Math.round(l.min);
+        previo.est.push(hasta);
+        continue;
+      }
+      const desde = previo ? previo.est[previo.est.length - 1] : null;
+      legs.push({ li: -1, min: Math.round(l.min), est: desde === null ? [hasta] : [desde, hasta] });
     } else {
-      const linea = lineas[l.li];
-      const nombres = l.estaciones.map((e) => estaciones.get(e).nombre);
-      legsOut.push({
-        tipo: linea.red,
-        linea: linea.nombre,
-        color: linea.color,
-        desde: nombres[0],
-        hasta: nombres[nombres.length - 1],
-        paradas: l.estaciones.length - 1,
+      legs.push({
+        li: l.li,
         min: Math.round(l.min + l.espera),
-        puntos: l.estaciones.map((e) => {
-          const est = estaciones.get(e);
-          return [+est.lng.toFixed(5), +est.lat.toFixed(5)];
-        }),
+        est: l.estaciones.map((e) => idxDe.get(e)),
       });
     }
   }
-  return { minutos: Math.round(ruta.total), optima, legs: legsOut.filter((l) => l.tipo !== 'caminar' || l.min >= 3) };
+  return { minutos: Math.round(ruta.total), optima, legs };
+}
+
+/** Zonas que toca una ruta (origen, destino y todas las estaciones intermedias). */
+function zonasDeRuta(ruta, origen, destino) {
+  const zonas = new Set();
+  const sumar = (id) => zonas.add(estaciones.get(id).zona);
+  sumar(origen);
+  sumar(destino);
+  for (const l of ruta.legs) for (const e of l.estaciones) sumar(e);
+  return zonas.has(null) ? null : [...zonas].sort();
 }
 
 function generarOpciones(origen, destino) {
   const optima = buscarRuta(origen, destino);
   if (!optima) return null;
   const viajes = optima.legs.filter((l) => l.tipo === 'viaje');
-  if (viajes.length < 2) return null; // exigimos al menos un transbordo
+  if (!viajes.length) return null; // tiene que haber al menos un tramo en transporte
 
   const candidatas = [{ ruta: optima, optima: true }];
   const firmas = new Set([firma(optima)]);
+  // el margen tolerado crece con el largo del viaje: en un viaje directo y corto,
+  // la alternativa razonable siempre es bastante peor
+  const extraMax = Math.max(50, optima.total * 0.9);
   const probar = (r) => {
     if (!r) return;
     const f = firma(r);
     if (firmas.has(f)) return;
     const extra = r.total - optima.total;
-    if (extra < 3 || extra > 45) return;
+    if (extra < 3 || extra > extraMax) return;
     firmas.add(f);
     candidatas.push({ ruta: r, optima: false });
   };
 
-  probar(buscarRuta(origen, destino, { rutasProhibidas: new Set([lineas[viajes[0].li].ruta]) }));
-  probar(buscarRuta(origen, destino, { rutasProhibidas: new Set([lineas[viajes[viajes.length - 1].li].ruta]) }));
+  // alternativas: sin cada una de las líneas del óptimo, y variando la aversión al transbordo
+  for (const v of viajes.slice(0, 3)) {
+    probar(buscarRuta(origen, destino, { rutasProhibidas: new Set([lineas[v.li].ruta]) }));
+  }
   probar(buscarRuta(origen, destino, { penalTransbordo: 12 })); // la "trampa": menos transbordos
-  if (candidatas.length < 3 && viajes.length >= 2) {
-    probar(buscarRuta(origen, destino, { rutasProhibidas: new Set([lineas[viajes[1].li].ruta]) }));
+  probar(buscarRuta(origen, destino, { penalTransbordo: -1.5 })); // la opuesta: más transbordos
+  if (candidatas.length < 3 && viajes.length >= 1) {
+    // último recurso: prohibir de a dos líneas para forzar un camino distinto
+    const rutasTop = viajes.slice(0, 2).map((v) => lineas[v.li].ruta);
+    probar(buscarRuta(origen, destino, { rutasProhibidas: new Set(rutasTop) }));
   }
-  if (candidatas.length < 3) return null;
+  // la óptima siempre entra; se completan hasta 3 alternativas y se mezcla el orden final
+  const mezclar = (arr) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  const alternativas = mezclar(candidatas.filter((c) => !c.optima)).slice(0, 3);
+  const elegidas = mezclar([candidatas.find((c) => c.optima), ...alternativas]);
+  const rutaOptima = elegidas.find((c) => c.optima).ruta;
+  return {
+    opciones: elegidas.map((c) => empaquetar(c.ruta, c.optima)),
+    rutaOptima,
+    combinaciones: viajes.length - 1,
+  };
+}
 
-  // mezcla determinística del orden de opciones
-  for (let i = candidatas.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    [candidatas[i], candidatas[j]] = [candidatas[j], candidatas[i]];
+// ---------- zona de cada estación (CABA / norte / oeste / sur) ----------
+const listaEstaciones = [...estaciones.values()];
+const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
+{
+  const poligonos = [];
+  const barriosFC = JSON.parse(readFileSync(join(ROOT, 'data-src','barrios.geojson'), 'utf8'));
+  for (const f of barriosFC.features) poligonos.push({ zona: 'caba', geom: f.geometry, ...bboxDeGeom(f.geometry) });
+
+  // los partidos ya los descargó build-dataset (caché en data-src)
+  const cacheIGN = join(ROOT, 'data-src', 'partidos-ign.geojson');
+  if (!existsSync(cacheIGN)) {
+    console.error('Falta data-src/partidos-ign.geojson. Corré antes: npm run dataset');
+    process.exit(1);
   }
-  return candidatas.slice(0, 4).map((c) => empaquetar(c.ruta, c.optima));
+  const ign = JSON.parse(readFileSync(cacheIGN, 'utf8'));
+  const zonaDePartido = new Map();
+  for (const [zona, nombres] of Object.entries(PARTIDOS_POR_ZONA)) {
+    for (const n of nombres) zonaDePartido.set(normalizarNombre(n), zona);
+  }
+  for (const f of ign.features) {
+    const zona = zonaDePartido.get(normalizarNombre(f.properties.nam ?? ''));
+    if (zona) poligonos.push({ zona, geom: f.geometry, ...bboxDeGeom(f.geometry) });
+  }
+
+  const conteo = {};
+  for (const e of listaEstaciones) {
+    const p = poligonos.find(
+      (p) => e.lng >= p.minX && e.lng <= p.maxX && e.lat >= p.minY && e.lat <= p.maxY && dentroDePoligono(e.lng, e.lat, p.geom)
+    );
+    e.zona = p?.zona ?? null;
+    conteo[e.zona ?? 'fuera'] = (conteo[e.zona ?? 'fuera'] ?? 0) + 1;
+  }
+  console.log('Estaciones por zona:', JSON.stringify(conteo));
 }
 
 // ---------- red navegable para la mecánica "armá tu viaje" ----------
-const listaEstaciones = [...estaciones.values()];
-const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
 {
   const caminatasOut = [];
   const vistas = new Set();
@@ -477,6 +552,7 @@ const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
     estaciones: listaEstaciones.map((e) => ({
       n: e.nombre,
       r: e.red,
+      z: e.zona,
       lat: +e.lat.toFixed(5),
       lng: +e.lng.toFixed(5),
     })),
@@ -494,35 +570,62 @@ const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
   console.log(`Red navegable: ${red.estaciones.length} estaciones, ${red.lineas.length} patrones, ${caminatasOut.length} caminatas`);
 }
 
-const BBOX = { latMin: -35.05, latMax: -34.25, lngMin: -59.05, lngMax: -57.85 };
-const elegibles = [...estaciones.values()].filter(
-  (e) => e.lat >= BBOX.latMin && e.lat <= BBOX.latMax && e.lng >= BBOX.lngMin && e.lng <= BBOX.lngMax
-);
-console.log(`Estaciones elegibles para desafíos: ${elegibles.length}`);
+// ---------- generación por cuotas (zonas × combinaciones) ----------
+const porZona = { caba: [], norte: [], oeste: [], sur: [] };
+for (const e of listaEstaciones) if (e.zona) porZona[e.zona].push(e);
+console.log(`Estaciones elegibles: ${Object.values(porZona).reduce((a, l) => a + l.length, 0)}`);
+
+// pasadas dirigidas: primero dentro de cada zona (lo más difícil de encontrar al azar), después entre zonas
+const PASADAS = [
+  ['caba', 'caba', 1600], ['sur', 'sur', 1600], ['oeste', 'oeste', 1400], ['norte', 'norte', 1400],
+  ['caba', 'sur', 900], ['caba', 'oeste', 900], ['caba', 'norte', 900],
+  ['norte', 'oeste', 700], ['oeste', 'sur', 700], ['norte', 'sur', 700],
+];
 
 const desafios = [];
 const porOrigen = new Map();
+const buckets = new Map();
 let intentos = 0;
-while (desafios.length < OBJETIVO_DESAFIOS && intentos < 4000) {
-  intentos++;
-  const a = elegibles[Math.floor(rnd() * elegibles.length)];
-  const b = elegibles[Math.floor(rnd() * elegibles.length)];
-  if (a.id === b.id || metros(a, b) < 6000) continue;
-  if ((porOrigen.get(a.id) ?? 0) >= 2) continue;
 
-  const opciones = generarOpciones(a.id, b.id);
-  if (!opciones) continue;
-  const opt = opciones.find((o) => o.optima);
-  if (opt.minutos < MIN_MINUTOS || opt.minutos > MAX_MINUTOS) continue;
+for (const [zA, zB, presupuesto] of PASADAS) {
+  const listaA = porZona[zA], listaB = porZona[zB];
+  if (!listaA.length || !listaB.length) continue;
+  for (let n = 0; n < presupuesto; n++) {
+    intentos++;
+    const a = listaA[Math.floor(rnd() * listaA.length)];
+    const b = listaB[Math.floor(rnd() * listaB.length)];
+    if (a.id === b.id || metros(a, b) < 3000) continue;
+    if ((porOrigen.get(a.id) ?? 0) >= TOPE_POR_ORIGEN) continue;
 
-  porOrigen.set(a.id, (porOrigen.get(a.id) ?? 0) + 1);
-  desafios.push({
-    origen: { nombre: a.nombre, red: a.red, lat: +a.lat.toFixed(5), lng: +a.lng.toFixed(5) },
-    destino: { nombre: b.nombre, red: b.red, lat: +b.lat.toFixed(5), lng: +b.lng.toFixed(5) },
-    idxOrigen: idxDe.get(a.id),
-    idxDestino: idxDe.get(b.id),
-    opciones,
-  });
+    const gen = generarOpciones(a.id, b.id);
+    if (!gen) continue;
+    const opt = gen.opciones.find((o) => o.optima);
+    if (opt.minutos < MIN_MINUTOS || opt.minutos > MAX_MINUTOS) continue;
+
+    const zonas = zonasDeRuta(gen.rutaOptima, a.id, b.id);
+    if (!zonas) continue; // la ruta se escapa de las 4 zonas
+
+    // "elegir el itinerario" necesita alternativas plausibles; "armá tu viaje" no.
+    // Los viajes sin suficientes opciones (típico de los directos y de las zonas
+    // con un solo ramal) se guardan igual, marcados para la mecánica de armado.
+    const minOpciones = gen.combinaciones === 0 ? 2 : 3;
+    const soloArmar = gen.opciones.length < minOpciones;
+
+    const nivel = Math.min(gen.combinaciones, 2);
+    const clave = `${zonas.join('+')}|${nivel}|${soloArmar ? 'b' : 'ab'}`;
+    if ((buckets.get(clave) ?? 0) >= CUPO_BUCKET) continue;
+    buckets.set(clave, (buckets.get(clave) ?? 0) + 1);
+    porOrigen.set(a.id, (porOrigen.get(a.id) ?? 0) + 1);
+
+    desafios.push({
+      o: idxDe.get(a.id),
+      d: idxDe.get(b.id),
+      z: zonas,
+      c: gen.combinaciones,
+      ...(soloArmar ? { soloArmar: 1 } : {}),
+      opciones: gen.opciones,
+    });
+  }
 }
 
 writeFileSync(
@@ -531,10 +634,19 @@ writeFileSync(
 );
 
 console.log(`\nDesafíos generados: ${desafios.length} (${intentos} intentos)`);
-for (const d of desafios.slice(0, 15)) {
+const resumenZonas = {};
+const resumenComb = {};
+for (const d of desafios) {
+  resumenZonas[d.z.join('+')] = (resumenZonas[d.z.join('+')] ?? 0) + 1;
+  resumenComb[d.c] = (resumenComb[d.c] ?? 0) + 1;
+}
+console.log('por zonas:', JSON.stringify(resumenZonas));
+console.log('por combinaciones:', JSON.stringify(resumenComb));
+console.log(`aptos para "elegir itinerario": ${desafios.filter((d) => !d.soloArmar).length} · solo para "armar": ${desafios.filter((d) => d.soloArmar).length}`);
+for (const d of desafios.slice(0, 10)) {
   const opt = d.opciones.find((o) => o.optima);
-  const resumen = opt.legs.map((l) => `${l.linea}`).join(' → ');
+  const resumen = opt.legs.map((l) => (l.li < 0 ? 'a pie' : lineas[l.li].nombre)).join(' → ');
   console.log(
-    `  ${d.origen.nombre} (${d.origen.red}) → ${d.destino.nombre} (${d.destino.red}): ${opt.minutos} min [${resumen}] · opciones: ${d.opciones.map((o) => o.minutos).join('/')}`
+    `  [${d.z.join('+')}·${d.c}] ${listaEstaciones[d.o].nombre} → ${listaEstaciones[d.d].nombre}: ${opt.minutos} min [${resumen}]`
   );
 }

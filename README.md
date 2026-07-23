@@ -63,11 +63,16 @@ les asigna barrio y comuna con los polígonos oficiales de BA Data, balancea por
   90 avenidas principales de CABA rankeadas por longitud; la ficha cuenta qué barrios recorre.
   Las opciones son determinísticas por avenida → los links compartidos son desafíos idénticos.
 - **Archivo**: calendario para jugar cualquier mapa del día pasado (desde el 1/1/2026).
-- **Cómo llegar A→B** (`?j=tr`): te dan dos estaciones de la red de subtes y trenes y hay que elegir
-  el itinerario más rápido entre varios (sin ver los tiempos). Calculado con Dijkstra sobre los GTFS
-  oficiales: tiempos reales de viaje, esperas por frecuencia y transbordos. Rondas configurables en
-  tandas de 5 (5/10/15/20). El dataset es versionado y regenerable: al sumar los colectivos (GTFS ya
+- **Cómo llegar A→B**: te dan dos estaciones de la red de subtes y trenes, con dos mecánicas —
+  *elegir el itinerario* más rápido entre varios sin ver los tiempos (`?j=tr`), o *armar tu viaje*
+  paso a paso con líneas, transbordos y caminatas (`?j=ar`). Todo calculado con Dijkstra sobre los
+  GTFS oficiales: tiempos reales de viaje, esperas por frecuencia y transbordos.
+  **Dificultad configurable**: zonas por las que puede pasar el viaje (CABA / Norte / Oeste / Sur,
+  combinables) y cantidad de combinaciones (directo, 1, 2 o más). 318 viajes generados, etiquetados
+  por zona y combinaciones; los que no tienen alternativas plausibles quedan reservados para
+  "armá tu viaje". El dataset es versionado y regenerable: al sumar los colectivos (GTFS ya
   descargado, requiere credenciales de API Transporte) se recalculan todas las rutas.
+- **Rondas** configurables en tandas de 5 (5/10/15/20) en todos los modos, desde el panel de cada uno.
 
 ## Roadmap
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { numeroDia } from '../game/logica';
+import { Panel, Seccion } from './Panel';
 
 const DIAS_SEMANA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
@@ -26,17 +27,24 @@ export default function Archivo({ onElegir, onCerrar }: Props) {
   const titulo = mesVista.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   return (
-    <div className="modal-fondo" onClick={onCerrar}>
-      <div className="modal modal-archivo" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-encabezado">
-          <span>Archivo de mapas del día</span>
-          <button type="button" className="modal-cerrar" onClick={onCerrar}>✕</button>
-        </div>
-        <div className="cal-nav">
-          <button type="button" onClick={() => setMesVista(new Date(anio, mes - 1, 1))} aria-label="Mes anterior">‹</button>
-          <span className="cal-titulo">{titulo.charAt(0).toUpperCase() + titulo.slice(1)}</span>
-          <button type="button" onClick={() => setMesVista(new Date(anio, mes + 1, 1))} aria-label="Mes siguiente">›</button>
-        </div>
+    <Panel
+      titulo="Archivo"
+      bajada="Jugá el mapa del día de cualquier fecha pasada. Es el mismo para todos."
+      onCerrar={onCerrar}
+    >
+      <Seccion
+        titulo={titulo.charAt(0).toUpperCase() + titulo.slice(1)}
+        hint={
+          <span className="cal-nav">
+            <button type="button" onClick={() => setMesVista(new Date(anio, mes - 1, 1))} aria-label="Mes anterior">
+              ‹
+            </button>
+            <button type="button" onClick={() => setMesVista(new Date(anio, mes + 1, 1))} aria-label="Mes siguiente">
+              ›
+            </button>
+          </span>
+        }
+      >
         <div className="cal-semana">
           {DIAS_SEMANA.map((d) => (
             <span key={d}>{d}</span>
@@ -60,8 +68,7 @@ export default function Archivo({ onElegir, onCerrar }: Props) {
             );
           })}
         </div>
-        <p className="cal-pie">Elegí una fecha para jugar ese mapa del día (CABA). El link queda listo para compartir.</p>
-      </div>
-    </div>
+      </Seccion>
+    </Panel>
   );
 }

@@ -1,234 +1,174 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Area, DatosZona, ZonaId } from '../game/tipos';
-import { RONDAS, TANDAS } from '../game/logica';
-import { IDS_ZONA, ZONAS, type ZonaDef } from '../game/zonas';
+import { useEffect, useRef, useState } from 'react';
+import type { DatosZona, DesafioTransporte, ZonaId } from '../game/tipos';
+import { TANDAS } from '../game/logica';
+import { ZONAS, type ZonaDef } from '../game/zonas';
 import Archivo from './Archivo';
+import PanelEsquinas, { type ConfigEsquinas } from './PanelEsquinas';
+import PanelTransporte, { type ConfigTransporte } from './PanelTransporte';
+import { Panel, Seccion, Segmentado } from './Panel';
 
-export const COLORES_COMUNA = [
-  '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#10b981', '#14b8a6',
-  '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#ec4899',
-];
-export const colorComuna = (c: number) => COLORES_COMUNA[(c - 1) % COLORES_COMUNA.length];
+export { colorComuna } from './colores';
+
+type Abierto = null | 'esquinas' | 'transporte' | 'avenidas' | 'archivo';
 
 interface Props {
   zona: ZonaDef;
   datos: DatosZona | null;
-  onZona: (z: ZonaId) => void;
+  desafiosTransporte: DesafioTransporte[] | null;
+  onPedirZona: (z: ZonaId) => Promise<DatosZona>;
+  onPedirTransporte: () => Promise<DesafioTransporte[]>;
   onDia: () => void;
-  onPractica: () => void;
-  onPorAreas: (ids: number[]) => void;
-  onAvenidas: () => void;
-  onTransporte: (rondas: number, mecanica: 'elegir' | 'armar') => void;
+  onEsquinas: (config: ConfigEsquinas) => void;
+  onAvenidas: (rondas: number) => void;
+  onTransporte: (config: ConfigTransporte, indices: number[]) => void;
   onArchivo: (dia: number) => void;
 }
 
-export default function Menu({ zona, datos, onZona, onDia, onPractica, onPorAreas, onAvenidas, onTransporte, onArchivo }: Props) {
-  const [abierto, setAbierto] = useState(false);
-  const [modalAreas, setModalAreas] = useState(false);
-  const [modalArchivo, setModalArchivo] = useState(false);
-  const [modalRondas, setModalRondas] = useState(false);
-  const [mecanica, setMecanica] = useState<'elegir' | 'armar'>('elegir');
+export default function Menu({
+  zona,
+  datos,
+  desafiosTransporte,
+  onPedirZona,
+  onPedirTransporte,
+  onDia,
+  onEsquinas,
+  onAvenidas,
+  onTransporte,
+  onArchivo,
+}: Props) {
+  const [abiertoMenu, setAbiertoMenu] = useState(false);
+  const [panel, setPanel] = useState<Abierto>(null);
+  const [desafios, setDesafios] = useState<DesafioTransporte[] | null>(desafiosTransporte);
+  const [rondasAvenidas, setRondasAvenidas] = useState(5);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!abierto) return;
+    if (!abiertoMenu) return;
     const cerrar = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setAbierto(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setAbiertoMenu(false);
     };
     document.addEventListener('mousedown', cerrar);
     return () => document.removeEventListener('mousedown', cerrar);
-  }, [abierto]);
+  }, [abiertoMenu]);
 
   const item = (accion: () => void) => () => {
-    setAbierto(false);
+    setAbiertoMenu(false);
     accion();
   };
 
+  async function abrirTransporte() {
+    setPanel('transporte');
+    if (!desafios) setDesafios(await onPedirTransporte());
+  }
+
   return (
     <div className="menu-wrap" ref={wrapRef}>
-      <button type="button" className="menu-btn" onClick={() => setAbierto((v) => !v)}>
+      <button type="button" className="menu-btn" onClick={() => setAbiertoMenu((v) => !v)} aria-expanded={abiertoMenu}>
         Menú ▾
       </button>
-      {abierto && (
-        <div className="menu-lista">
-          <div className="menu-zonas">
-            {IDS_ZONA.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className={`zona-chip${id === zona.id ? ' activo' : ''}`}
-                onClick={item(() => onZona(id))}
-              >
-                {ZONAS[id].corto}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={item(onDia)}>Mapa del día <small>CABA</small></button>
-          <button type="button" onClick={item(onPractica)}>Práctica libre <small>{zona.corto}</small></button>
-          <button type="button" onClick={item(() => setModalAreas(true))}>
-            Por {zona.etiquetaAreas.toLowerCase()}… <small>{zona.corto}</small>
+
+      {abiertoMenu && (
+        <div className="menu-lista" role="menu">
+          <button type="button" onClick={item(onDia)}>
+            <span>Mapa del día</span>
+            <small>el desafío diario de CABA</small>
           </button>
-          <button type="button" onClick={item(onAvenidas)}>Modo Avenidas <small>CABA</small></button>
-          <button type="button" onClick={item(() => setModalRondas(true))}>Cómo llegar (A→B) <small>subte+tren</small></button>
-          <button type="button" onClick={item(() => setModalArchivo(true))}>Archivo <small>días pasados</small></button>
+          <button type="button" onClick={item(() => setPanel('esquinas'))}>
+            <span>Encontrá la esquina</span>
+            <small>zona, barrios y rondas</small>
+          </button>
+          <button type="button" onClick={item(() => setPanel('avenidas'))}>
+            <span>Avenidas</span>
+            <small>reconocé la avenida marcada</small>
+          </button>
+          <button type="button" onClick={item(() => void abrirTransporte())}>
+            <span>Cómo llegar (A→B)</span>
+            <small>subte y trenes, con dificultad</small>
+          </button>
+          <button type="button" onClick={item(() => setPanel('archivo'))}>
+            <span>Archivo</span>
+            <small>mapas del día pasados</small>
+          </button>
         </div>
       )}
-      {modalAreas && datos && (
-        <ModalAreas
-          titulo={`Partida por ${zona.etiquetaAreas.toLowerCase()}`}
+
+      {panel === 'esquinas' && datos && (
+        <PanelEsquinas
+          zonaActual={zona.id}
           datos={datos}
-          onCerrar={() => setModalAreas(false)}
-          onEmpezar={(ids) => {
-            setModalAreas(false);
-            onPorAreas(ids);
+          onPedirZona={onPedirZona}
+          onCerrar={() => setPanel(null)}
+          onJugar={(c) => {
+            setPanel(null);
+            onEsquinas(c);
           }}
         />
       )}
-      {modalArchivo && (
+
+      {panel === 'transporte' && (
+        <>
+          {desafios ? (
+            <PanelTransporte
+              desafios={desafios}
+              onCerrar={() => setPanel(null)}
+              onJugar={(c, indices) => {
+                setPanel(null);
+                onTransporte(c, indices);
+              }}
+            />
+          ) : (
+            <Panel titulo="Cómo llegar de A a B" onCerrar={() => setPanel(null)}>
+              <p className="panel-cargando">Cargando la red de subtes y trenes…</p>
+            </Panel>
+          )}
+        </>
+      )}
+
+      {panel === 'avenidas' && (
+        <Panel
+          titulo="Avenidas"
+          bajada="Marcamos una avenida en el mapa y tenés que reconocerla entre cuatro opciones."
+          onCerrar={() => setPanel(null)}
+          pie={
+            <>
+              <span className="panel-resumen">
+                <strong>90</strong> avenidas principales de CABA
+              </span>
+              <button
+                type="button"
+                className="btn-primario"
+                onClick={() => {
+                  setPanel(null);
+                  onAvenidas(rondasAvenidas);
+                }}
+              >
+                Jugar {rondasAvenidas} rondas
+              </button>
+            </>
+          }
+        >
+          <Seccion titulo="Rondas">
+            <Segmentado
+              opciones={TANDAS.map((n) => ({ valor: n, etiqueta: String(n) }))}
+              valor={rondasAvenidas}
+              onCambio={setRondasAvenidas}
+              ariaLabel="Cantidad de rondas"
+            />
+          </Seccion>
+        </Panel>
+      )}
+
+      {panel === 'archivo' && (
         <Archivo
-          onCerrar={() => setModalArchivo(false)}
+          onCerrar={() => setPanel(null)}
           onElegir={(dia) => {
-            setModalArchivo(false);
+            setPanel(null);
             onArchivo(dia);
           }}
         />
       )}
-      {modalRondas && (
-        <div className="modal-fondo" onClick={() => setModalRondas(false)}>
-          <div className="modal modal-rondas" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-encabezado">
-              <span>Cómo llegar (A→B)</span>
-              <button type="button" className="modal-cerrar" onClick={() => setModalRondas(false)}>✕</button>
-            </div>
-            <p className="modal-texto">
-              Te damos un punto A y un punto B de la red de subtes y trenes. ¿Cómo jugás?
-            </p>
-            <div className="mecanica-opciones">
-              <button
-                type="button"
-                className={`btn-mecanica${mecanica === 'elegir' ? ' activo' : ''}`}
-                onClick={() => setMecanica('elegir')}
-              >
-                🃏 Elegí el itinerario
-                <small>te mostramos 3-4 opciones, marcá la más rápida</small>
-              </button>
-              <button
-                type="button"
-                className={`btn-mecanica${mecanica === 'armar' ? ' activo' : ''}`}
-                onClick={() => setMecanica('armar')}
-              >
-                🧩 Armá tu viaje
-                <small>construilo paso a paso: líneas, transbordos, caminatas</small>
-              </button>
-            </div>
-            <p className="modal-texto">¿Cuántas rondas?</p>
-            <div className="rondas-opciones">
-              {TANDAS.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className="btn-primario"
-                  onClick={() => {
-                    setModalRondas(false);
-                    onTransporte(n, mecanica);
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function ModalAreas({
-  titulo,
-  datos,
-  onCerrar,
-  onEmpezar,
-}: {
-  titulo: string;
-  datos: DatosZona;
-  onCerrar: () => void;
-  onEmpezar: (ids: number[]) => void;
-}) {
-  const [seleccion, setSeleccion] = useState<Set<number>>(() => new Set(datos.areas.map((a) => a.id)));
-
-  const conteo = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const e of datos.esquinas) m.set(e.b, (m.get(e.b) ?? 0) + 1);
-    return m;
-  }, [datos]);
-
-  const grupos = useMemo(() => {
-    const conGrupo = datos.areas.some((a) => a.grupo !== undefined);
-    if (!conGrupo) return [[0, datos.areas] as [number, Area[]]];
-    const m = new Map<number, Area[]>();
-    for (const a of datos.areas) {
-      const g = a.grupo ?? 0;
-      if (!m.has(g)) m.set(g, []);
-      m.get(g)!.push(a);
-    }
-    return [...m.entries()].sort((a, b) => a[0] - b[0]);
-  }, [datos]);
-
-  const todos = seleccion.size === datos.areas.length;
-  const disponibles = datos.areas.reduce((acc, a) => (seleccion.has(a.id) ? acc + (conteo.get(a.id) ?? 0) : acc), 0);
-  const alcanza = disponibles >= RONDAS;
-
-  const alternar = (id: number) =>
-    setSeleccion((prev) => {
-      const s = new Set(prev);
-      if (s.has(id)) s.delete(id);
-      else s.add(id);
-      return s;
-    });
-
-  return (
-    <div className="modal-fondo" onClick={onCerrar}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-encabezado">
-          <span>{titulo}</span>
-          <button type="button" className="modal-cerrar" onClick={onCerrar}>✕</button>
-        </div>
-        <button
-          type="button"
-          className="btn-secundario"
-          onClick={() => setSeleccion(todos ? new Set() : new Set(datos.areas.map((a) => a.id)))}
-        >
-          {todos ? 'Destildar todos' : 'Seleccionar todos'}
-        </button>
-        <div className="barrios-scroll">
-          {grupos.map(([g, lista]) => (
-            <div key={g} className="grupo-comuna">
-              {g > 0 && (
-                <div className="grupo-titulo" style={{ color: colorComuna(g) }}>
-                  Comuna {g}
-                </div>
-              )}
-              <div className="chips">
-                {lista.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className={`chip${seleccion.has(a.id) ? ' activo' : ''}`}
-                    style={{ '--color-comuna': g > 0 ? colorComuna(g) : '#4cc2ff' } as React.CSSProperties}
-                    onClick={() => alternar(a.id)}
-                  >
-                    {a.nombre}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        <button type="button" className="btn-primario" disabled={!alcanza} onClick={() => onEmpezar([...seleccion])}>
-          {alcanza ? 'Empezar' : `Elegí al menos un ${titulo.includes('partidos') ? 'partido' : 'barrio'}`}
-        </button>
-      </div>
-    </div>
-  );
-}
+export { ZONAS };

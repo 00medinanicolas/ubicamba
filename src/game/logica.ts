@@ -38,13 +38,13 @@ export function indicesAlAzar(total: number, cantidad = RONDAS): number[] {
   return mezclar(Array.from({ length: total }, (_, i) => i)).slice(0, cantidad);
 }
 
-export function indicesPorAreas(esquinas: Esquina[], areas: number[]): number[] {
+export function indicesPorAreas(esquinas: Esquina[], areas: number[], cantidad = RONDAS): number[] {
   const set = new Set(areas);
   const pool: number[] = [];
   esquinas.forEach((e, i) => {
     if (set.has(e.b)) pool.push(i);
   });
-  return mezclar(pool).slice(0, RONDAS);
+  return mezclar(pool).slice(0, cantidad);
 }
 
 // ---------- distancia y puntaje ----------

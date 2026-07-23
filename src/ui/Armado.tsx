@@ -21,12 +21,12 @@ interface Props {
 
 /** Constructor paso a paso del viaje: línea → hasta dónde → transbordo → … */
 export default function Armado({ red, desafio, onCambio, onLlegada, onRendirse }: Props) {
-  const [estado, setEstado] = useState<EstadoArmado>(() => estadoInicial(desafio.idxOrigen));
+  const [estado, setEstado] = useState<EstadoArmado>(() => estadoInicial(desafio.o));
   const [eligiendo, setEligiendo] = useState<{ li: number; pos: number } | null>(null);
 
   // reset al cambiar de desafío
   useEffect(() => {
-    setEstado(estadoInicial(desafio.idxOrigen));
+    setEstado(estadoInicial(desafio.o));
     setEligiendo(null);
     onCambio([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -36,7 +36,7 @@ export default function Armado({ red, desafio, onCambio, onLlegada, onRendirse }
     setEstado(nuevo);
     setEligiendo(null);
     onCambio(nuevo.legs);
-    if (nuevo.actual === desafio.idxDestino) {
+    if (nuevo.actual === desafio.d) {
       onLlegada(Math.round(nuevo.minutos), nuevo.legs);
     }
   }
@@ -63,7 +63,7 @@ export default function Armado({ red, desafio, onCambio, onLlegada, onRendirse }
             <button
               key={b.posFin}
               type="button"
-              className={`chip${b.idx === desafio.idxDestino ? ' chip-destino' : ''}`}
+              className={`chip${b.idx === desafio.d ? ' chip-destino' : ''}`}
               onClick={() => aplicar(tomarLinea(red, estado, eligiendo.li, eligiendo.pos, b.posFin))}
             >
               {b.nombre} <small>·{b.paradas}</small>
@@ -107,7 +107,7 @@ export default function Armado({ red, desafio, onCambio, onLlegada, onRendirse }
           <button
             key={c.hasta}
             type="button"
-            className={`chip${c.hasta === desafio.idxDestino ? ' chip-destino' : ''}`}
+            className={`chip${c.hasta === desafio.d ? ' chip-destino' : ''}`}
             onClick={() => aplicar(caminar(estado, c.hasta, c.min))}
           >
             🚶 {c.nombre} <small>·{Math.round(c.min)}′</small>
