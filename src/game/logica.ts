@@ -1,4 +1,4 @@
-import type { Avenida, Esquina, Juego, ZonaId } from './tipos';
+import type { Avenida, DesafioTransporte, Esquina, Juego, ZonaId } from './tipos';
 import { esZonaId } from './zonas';
 
 /** Tanda base: las partidas se arman en múltiplos de 5 rondas (5, 10, 15, 20). */
@@ -36,6 +36,32 @@ function mezclar<T>(arr: T[], rnd: () => number = Math.random): T[] {
 
 export function indicesAlAzar(total: number, cantidad = RONDAS): number[] {
   return mezclar(Array.from({ length: total }, (_, i) => i)).slice(0, cantidad);
+}
+
+/**
+ * Índices de desafíos A→B al azar, respetando la mecánica.
+ *
+ * "Elegir el itinerario" necesita alternativas plausibles: los viajes marcados
+ * `soloArmar` tienen una sola opción (o menos de las que pide su nivel de
+ * combinaciones), así que preguntar "¿cómo conviene ir?" sobre ellos no es una
+ * pregunta —son 100 puntos regalados—. En "armá tu viaje" sí valen: ahí no se
+ * elige entre alternativas sino que se arma el recorrido paso a paso.
+ *
+ * El panel ya filtraba esto (ver filtrarDesafios), pero el sorteo al azar —el
+ * que corre al entrar por un link `?j=tr` y al tocar "Jugar otra"— sorteaba
+ * sobre el dataset entero.
+ */
+export function indicesTransporteAlAzar(
+  desafios: DesafioTransporte[],
+  juego: Juego,
+  cantidad = RONDAS
+): number[] {
+  const pool: number[] = [];
+  desafios.forEach((d, i) => {
+    if (juego === 'transporte' && d.soloArmar) return;
+    pool.push(i);
+  });
+  return mezclar(pool).slice(0, cantidad);
 }
 
 export function indicesPorAreas(esquinas: Esquina[], areas: number[], cantidad = RONDAS): number[] {

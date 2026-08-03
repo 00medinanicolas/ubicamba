@@ -17,6 +17,7 @@ import {
   distanciaM,
   emojiPuntos,
   indicesAlAzar,
+  indicesTransporteAlAzar,
   indicesDelDia,
   indicesPorAreas,
   nombreEsquina,
@@ -90,8 +91,17 @@ export default function App() {
           const [datosTr, redTr] = await Promise.all([cargarTransporte(), cargarRed()]);
           tr = datosTr;
           setRed(redTr);
+          // Con `e=` en la URL mandan esos índices tal cual, aunque incluyan viajes
+          // `soloArmar`: un link compartido tiene que reproducir la MISMA partida.
+          // Sin `e=`, el sorteo respeta la mecánica.
           const validos = p.indices && p.indices.every((i) => i < datosTr.desafios.length);
-          s = sesionBase('caba', p.juego, validos ? p.indices! : indicesAlAzar(datosTr.desafios.length), 'link', []);
+          s = sesionBase(
+            'caba',
+            p.juego,
+            validos ? p.indices! : indicesTransporteAlAzar(datosTr.desafios, p.juego),
+            'link',
+            []
+          );
         } else if (p.juego === 'avenidas') {
           avs = await cargarAvenidas();
           const validos = p.indices && p.indices.every((i) => i < avs!.length);
@@ -209,7 +219,13 @@ export default function App() {
     if (!sesion || !datos) return;
     if ((sesion.juego === 'transporte' || sesion.juego === 'armar') && transporte) {
       empezar(
-        sesionBase('caba', sesion.juego, indicesAlAzar(transporte.desafios.length, sesion.indices.length), 'link', []),
+        sesionBase(
+          'caba',
+          sesion.juego,
+          indicesTransporteAlAzar(transporte.desafios, sesion.juego, sesion.indices.length),
+          'link',
+          []
+        ),
         datos
       );
       return;
