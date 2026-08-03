@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DatosZona, DesafioTransporte, ZonaId } from '../game/tipos';
+import type { DatosZona, DesafioTransporte, Lugar, ZonaId } from '../game/tipos';
 import { TANDAS } from '../game/logica';
 import { ZONAS, type ZonaDef } from '../game/zonas';
 import Archivo from './Archivo';
 import PanelEsquinas, { type ConfigEsquinas } from './PanelEsquinas';
 import PanelTransporte, { type ConfigTransporte } from './PanelTransporte';
+import PanelLugares, { type ConfigLugares } from './PanelLugares';
 import { Panel, Seccion, Segmentado } from './Panel';
 
 export { colorComuna } from './colores';
 
-type Abierto = null | 'esquinas' | 'transporte' | 'avenidas' | 'archivo';
+type Abierto = null | 'esquinas' | 'transporte' | 'avenidas' | 'lugares' | 'archivo';
 
 interface Props {
   zona: ZonaDef;
@@ -17,10 +18,12 @@ interface Props {
   desafiosTransporte: DesafioTransporte[] | null;
   onPedirZona: (z: ZonaId) => Promise<DatosZona>;
   onPedirTransporte: () => Promise<DesafioTransporte[]>;
+  onPedirLugares: () => Promise<Lugar[]>;
   onDia: () => void;
   onEsquinas: (config: ConfigEsquinas) => void;
   onAvenidas: (rondas: number) => void;
   onTransporte: (config: ConfigTransporte, indices: number[]) => void;
+  onLugares: (config: ConfigLugares, indices: number[]) => void;
   onArchivo: (dia: number) => void;
 }
 
@@ -30,15 +33,18 @@ export default function Menu({
   desafiosTransporte,
   onPedirZona,
   onPedirTransporte,
+  onPedirLugares,
   onDia,
   onEsquinas,
   onAvenidas,
   onTransporte,
+  onLugares,
   onArchivo,
 }: Props) {
   const [abiertoMenu, setAbiertoMenu] = useState(false);
   const [panel, setPanel] = useState<Abierto>(null);
   const [desafios, setDesafios] = useState<DesafioTransporte[] | null>(desafiosTransporte);
+  const [lugares, setLugares] = useState<Lugar[] | null>(null);
   const [rondasAvenidas, setRondasAvenidas] = useState(5);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +65,11 @@ export default function Menu({
   async function abrirTransporte() {
     setPanel('transporte');
     if (!desafios) setDesafios(await onPedirTransporte());
+  }
+
+  async function abrirLugares() {
+    setPanel('lugares');
+    if (!lugares) setLugares(await onPedirLugares());
   }
 
   return (
@@ -84,6 +95,10 @@ export default function Menu({
           <button type="button" onClick={item(() => void abrirTransporte())}>
             <span>Cómo llegar (A→B)</span>
             <small>subte y trenes, con dificultad</small>
+          </button>
+          <button type="button" onClick={item(() => void abrirLugares())}>
+            <span>Lugares típicos</span>
+            <small>identificá el lugar marcado</small>
           </button>
           <button type="button" onClick={item(() => setPanel('archivo'))}>
             <span>Archivo</span>
@@ -119,6 +134,25 @@ export default function Menu({
           ) : (
             <Panel titulo="Cómo llegar de A a B" onCerrar={() => setPanel(null)}>
               <p className="panel-cargando">Cargando la red de subtes y trenes…</p>
+            </Panel>
+          )}
+        </>
+      )}
+
+      {panel === 'lugares' && (
+        <>
+          {lugares ? (
+            <PanelLugares
+              lugares={lugares}
+              onCerrar={() => setPanel(null)}
+              onJugar={(c, indices) => {
+                setPanel(null);
+                onLugares(c, indices);
+              }}
+            />
+          ) : (
+            <Panel titulo="Lugares típicos" onCerrar={() => setPanel(null)}>
+              <p className="panel-cargando">Cargando los lugares…</p>
             </Panel>
           )}
         </>

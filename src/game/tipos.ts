@@ -1,6 +1,26 @@
 export type ZonaId = 'caba' | 'norte' | 'oeste' | 'sur';
 
-export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar';
+export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar' | 'lugares';
+
+export type CategoriaLugar =
+  | 'monumento' | 'estado' | 'biblioteca' | 'cultura' | 'museo' | 'comida' | 'estadio';
+
+/** Un lugar típico: se marca en el mapa y hay que decir cuál es. */
+export interface Lugar {
+  n: string;
+  cat: CategoriaLugar;
+  /** caba | pba */
+  z: 'caba' | 'pba';
+  lat: number;
+  lng: number;
+  /** otras formas que se aceptan al escribir la respuesta */
+  a?: string[];
+}
+
+export interface DatosLugares {
+  version: string;
+  lugares: Lugar[];
+}
 
 export interface RedEstacion {
   n: string;
@@ -120,4 +140,6 @@ export interface Sesion {
   ronda: number;
   fase: Fase;
   resultados: Resultado[];
+  /** modo Lugares: true = se escribe la respuesta; false/ausente = multiple choice */
+  escribir?: boolean;
 }

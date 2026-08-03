@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapaML } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -101,6 +101,11 @@ export default function GameMap({
   const marcadoresRef = useRef<maplibregl.Marker[]>([]);
   const marcadoresABRef = useRef<maplibregl.Marker[]>([]);
   const listoRef = useRef(false);
+  // `listoRef` es un ref, así que nada re-renderiza cuando el mapa queda listo: los
+  // efectos que dependen de él se salteaban si sus datos llegaban ANTES que el estilo.
+  // Con los modos viejos nunca se notaba (los datasets tardan más que el mapa), pero
+  // el de Lugares carga un JSON chico y el marcador no aparecía. Espejo en estado:
+  const [listo, setListo] = useState(false);
   const capasOverlayRef = useRef<string[]>([]);
 
   const clickRef = useRef(clickHabilitado);
@@ -199,6 +204,7 @@ export default function GameMap({
       agregarOverlays(mapa);
       aplicarResultados(mapa, resultadosRef.current);
       listoRef.current = true;
+      setListo(true);
     }
 
     iniciar();
@@ -209,6 +215,7 @@ export default function GameMap({
       mapaRef.current?.remove();
       mapaRef.current = null;
       listoRef.current = false;
+      setListo(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -300,7 +307,7 @@ export default function GameMap({
     const mapa = mapaRef.current;
     if (mapa && listoRef.current) aplicarResultados(mapa, resultados);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resultados]);
+  }, [resultados, listo]);
 
   // cambio de zona → overlays nuevos + encuadre
   useEffect(() => {
@@ -325,7 +332,7 @@ export default function GameMap({
       if (bbox) mapa.fitBounds(bbox, { padding: 60, duration: 700, maxZoom: 14.5 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destacado]);
+  }, [destacado, listo]);
 
   // trazado de la opción elegida (cuando no fue la óptima)
   useEffect(() => {
@@ -333,12 +340,12 @@ export default function GameMap({
     if (!mapa || !listoRef.current) return;
     (mapa.getSource('trazado-malo') as GeoJSONSource | undefined)?.setData(trazadoMalo ?? FC_VACIA);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trazadoMalo]);
+  }, [trazadoMalo, listo]);
 
   // marcadores A/B del modo transporte (amplían la vista al AMBA)
   useEffect(() => {
     const mapa = mapaRef.current;
-    if (!mapa) return;
+    if (!mapa || !listoRef.current) return;
     marcadoresABRef.current.forEach((m) => m.remove());
     marcadoresABRef.current = [];
     if (marcadoresAB?.length) {
@@ -359,7 +366,7 @@ export default function GameMap({
       mapa.setMaxBounds(zonaRef.current.limites);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marcadoresAB]);
+  }, [marcadoresAB, listo]);
 
   // cambio de mapa base (plano ⇄ satélite)
   const basemapPrevio = useRef(basemap);
@@ -369,6 +376,7 @@ export default function GameMap({
     const mapa = mapaRef.current;
     if (!mapa) return;
     listoRef.current = false;
+    setListo(false);
     crearEstilo(basemap).then((estilo) => {
       if (mapaRef.current === mapa) mapa.setStyle(estilo); // style.load re-arma las capas
     });

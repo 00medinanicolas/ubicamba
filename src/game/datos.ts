@@ -1,4 +1,4 @@
-import type { Avenida, DatosTransporte, DatosZona, RedTransporte, ZonaId } from './tipos';
+import type { Avenida, DatosLugares, DatosTransporte, DatosZona, Lugar, RedTransporte, ZonaId } from './tipos';
 
 /** Resuelve rutas de assets respetando el base de Vite (en Pages la app vive bajo /ubicamba/). */
 export const ruta = (p: string) => import.meta.env.BASE_URL + p.replace(/^\//, '');
@@ -42,6 +42,21 @@ export function cargarRed(): Promise<RedTransporte> {
     cacheRed.catch(() => (cacheRed = null));
   }
   return cacheRed;
+}
+
+let cacheLugares: Promise<Lugar[]> | null = null;
+
+export function cargarLugares(): Promise<Lugar[]> {
+  if (!cacheLugares) {
+    cacheLugares = fetch(ruta('data/lugares-v1.json'))
+      .then((r) => {
+        if (!r.ok) throw new Error(`No se pudieron cargar los lugares (${r.status})`);
+        return r.json() as Promise<DatosLugares>;
+      })
+      .then((d) => d.lugares);
+    cacheLugares.catch(() => (cacheLugares = null));
+  }
+  return cacheLugares;
 }
 
 let cacheAvenidas: Promise<Avenida[]> | null = null;

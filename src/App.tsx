@@ -5,6 +5,7 @@ import type {
   DatosZona,
   DesafioTransporte,
   Juego,
+  Lugar,
   Modo,
   OpcionTransporte,
   RedTransporte,
@@ -18,17 +19,20 @@ import {
   emojiPuntos,
   indicesAlAzar,
   indicesTransporteAlAzar,
+  indicesLugaresAlAzar,
   indicesDelDia,
   indicesPorAreas,
   nombreEsquina,
   numeroDia,
   opcionesAvenida,
+  opcionesLugar,
   parseURL,
   puntosPorDistancia,
   urlCompartir,
 } from './game/logica';
 import { fcDeEst, resumenLegs, type LegArmado } from './game/armar';
-import { cargarAvenidas, cargarRed, cargarTransporte, cargarZona } from './game/datos';
+import { cargarAvenidas, cargarLugares, cargarRed, cargarTransporte, cargarZona } from './game/datos';
+import { aceptaRespuesta } from './game/respuestas';
 import { cargarSesion, guardarSesion, mismosIndices } from './game/sesion';
 import { ZONAS } from './game/zonas';
 import GameMap, { type MarcadorAB, type PinResultado } from './map/GameMap';
@@ -38,11 +42,24 @@ import Armado from './ui/Armado';
 import PanelFinal, { formatoDistancia, type FilaFinal } from './ui/PanelFinal';
 import type { ConfigEsquinas } from './ui/PanelEsquinas';
 import type { ConfigTransporte } from './ui/PanelTransporte';
+import type { ConfigLugares } from './ui/PanelLugares';
 import { colorComuna } from './ui/colores';
 
-function sesionBase(zona: ZonaId, juego: Juego, indices: number[], modo: Modo, areasSel: number[]): Sesion {
-  return { zona, juego, indices, modo, areasSel, ronda: 0, fase: 'adivinando', resultados: [] };
+function sesionBase(
+  zona: ZonaId,
+  juego: Juego,
+  indices: number[],
+  modo: Modo,
+  areasSel: number[],
+  escribir = false
+): Sesion {
+  return { zona, juego, indices, modo, areasSel, ronda: 0, fase: 'adivinando', resultados: [], escribir };
 }
+
+const ETIQUETA_CAT: Record<string, string> = {
+  monumento: 'monumento', estado: 'edificio del Estado', biblioteca: 'biblioteca',
+  cultura: 'cultura', museo: 'museo', comida: 'bar o comida típica', estadio: 'estadio',
+};
 
 function aplicarURL(s: Sesion) {
   // path actual + query de la partida: funciona igual en / y bajo /ubicamba/ (Pages)
@@ -54,6 +71,7 @@ function aplicarURL(s: Sesion) {
           zona: s.zona,
           juego: s.juego,
           areas: s.modo === 'personalizada' ? s.areasSel : undefined,
+          escribir: s.escribir,
         }));
   // conservar el shim de testing (dev) a través de las navegaciones internas
   if (new URLSearchParams(window.location.search).has('rafshim')) {
@@ -68,6 +86,8 @@ export default function App() {
   const [datos, setDatos] = useState<DatosZona | null>(null);
   const [avenidas, setAvenidas] = useState<Avenida[] | null>(null);
   const [transporte, setTransporte] = useState<DatosTransporte | null>(null);
+  const [lugares, setLugares] = useState<Lugar[] | null>(null);
+  const [escrito, setEscrito] = useState('');
   const [red, setRed] = useState<RedTransporte | null>(null);
   const [armadoLegs, setArmadoLegs] = useState<LegArmado[]>([]);
   const [sesion, setSesion] = useState<Sesion | null>(null);
@@ -101,6 +121,18 @@ export default function App() {
             validos ? p.indices! : indicesTransporteAlAzar(datosTr.desafios, p.juego),
             'link',
             []
+          );
+        } else if (p.juego === 'lugares') {
+          const lug = await cargarLugares();
+          setLugares(lug);
+          const validos = p.indices && p.indices.every((i) => i < lug.length);
+          s = sesionBase(
+            'caba',
+            'lugares',
+            validos ? p.indices! : indicesLugaresAlAzar(lug, [], []),
+            'link',
+            [],
+            p.escribir
           );
         } else if (p.juego === 'avenidas') {
           avs = await cargarAvenidas();
@@ -182,6 +214,26 @@ export default function App() {
     return tr.desafios;
   }
 
+  async function pedirLugares() {
+    const l = await cargarLugares();
+    setLugares(l);
+    return l;
+  }
+
+  async function jugarLugares(config: ConfigLugares, disponibles: number[]) {
+    const [d, lug] = await Promise.all([cargarZona('caba'), cargarLugares()]);
+    setLugares(lug);
+    const pool = [...disponibles];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    empezar(
+      sesionBase('caba', 'lugares', pool.slice(0, config.rondas), 'link', [], config.modalidad === 'escribir'),
+      d
+    );
+  }
+
   async function irAlDia(dia: number, modo: Modo) {
     const d = await cargarZona('caba');
     empezar(sesionBase('caba', 'esquinas', indicesDelDia(dia, d.esquinas.length), modo, []), d);
@@ -230,6 +282,17 @@ export default function App() {
       );
       return;
     }
+    if (sesion.juego === 'lugares' && lugares) {
+      empezar(
+        sesionBase(
+          'caba', 'lugares',
+          indicesLugaresAlAzar(lugares, [], [], sesion.indices.length),
+          'link', [], sesion.escribir
+        ),
+        datos
+      );
+      return;
+    }
     if (sesion.juego === 'avenidas' && avenidas) {
       empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avenidas.length, sesion.indices.length), 'link', []), datos);
       return;
@@ -263,6 +326,25 @@ export default function App() {
     const idx = sesion.indices[sesion.ronda];
     const correcta = avenidas[idx].nombre === nombre;
     const r: Resultado = { idx, guess: null, eleccion: nombre, distancia: 0, puntos: correcta ? 100 : 0 };
+    setSesion((s) => (s ? { ...s, fase: 'revelada', resultados: [...s.resultados, r] } : s));
+  }
+
+  /** Modo Lugares. `texto` es lo que el jugador escribió (o eligió); vacío = se rindió. */
+  function manejarLugar(texto: string) {
+    if (!sesion || !lugares || sesion.fase !== 'adivinando' || sesion.juego !== 'lugares') return;
+    const idx = sesion.indices[sesion.ronda];
+    const l = lugares[idx];
+    const correcta = sesion.escribir
+      ? aceptaRespuesta(texto, l.n, l.a ?? [])
+      : texto === l.n;
+    const r: Resultado = {
+      idx,
+      guess: null,
+      eleccion: texto || '(paso)',
+      distancia: 0,
+      puntos: correcta ? 100 : 0,
+    };
+    setEscrito('');
     setSesion((s) => (s ? { ...s, fase: 'revelada', resultados: [...s.resultados, r] } : s));
   }
 
@@ -300,6 +382,10 @@ export default function App() {
 
   const esquinaActual = juego === 'esquinas' && sesion && datos ? datos.esquinas[sesion.indices[sesion.ronda]] : null;
   const avenidaActual = juego === 'avenidas' && sesion && avenidas ? avenidas[sesion.indices[sesion.ronda]] : null;
+  const lugarActual =
+    juego === 'lugares' && sesion && lugares && sesion.fase !== 'terminado'
+      ? lugares[sesion.indices[sesion.ronda]]
+      : null;
   const desafioActual =
     esTransporte && sesion && transporte && sesion.fase !== 'terminado'
       ? transporte.desafios[sesion.indices[sesion.ronda]]
@@ -307,6 +393,7 @@ export default function App() {
 
   // el viaje armado se descarta al pasar de ronda o de juego
   useEffect(() => {
+    setEscrito('');
     setArmadoLegs([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sesion?.ronda, juego]);
@@ -327,6 +414,15 @@ export default function App() {
         : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [juego, sesion?.ronda, sesion?.indices, avenidas]
+  );
+
+  const opcionesLug = useMemo(
+    () =>
+      juego === 'lugares' && sesion && lugares && !sesion.escribir && sesion.fase !== 'terminado'
+        ? opcionesLugar(lugares, sesion.indices[sesion.ronda])
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [juego, sesion?.ronda, sesion?.indices, sesion?.escribir, lugares]
   );
 
   const ultimo = sesion?.resultados[sesion.resultados.length - 1];
@@ -364,6 +460,9 @@ export default function App() {
   }, [desafioActual, sesion?.fase, ultimo, juego, red, armadoLegs]);
 
   const marcadoresAB = useMemo<MarcadorAB[] | null>(() => {
+    if (lugarActual) {
+      return [{ latlng: [lugarActual.lat, lugarActual.lng], etiqueta: '?', color: '#e3b341' }];
+    }
     if (!desafioActual || !red) return null;
     const o = red.estaciones[desafioActual.o];
     const d = red.estaciones[desafioActual.d];
@@ -371,7 +470,7 @@ export default function App() {
       { latlng: [o.lat, o.lng], etiqueta: 'A', color: '#22c55e' },
       { latlng: [d.lat, d.lng], etiqueta: 'B', color: '#ef4444' },
     ];
-  }, [desafioActual, red]);
+  }, [desafioActual, red, lugarActual]);
 
   const pins: PinResultado[] = useMemo(() => {
     if (!sesion || !datos || sesion.juego !== 'esquinas') return [];
@@ -391,6 +490,7 @@ export default function App() {
     if (s.juego === 'transporte') return 'Cómo llegar (A→B)';
     if (s.juego === 'armar') return 'Armá tu viaje (A→B)';
     if (s.juego === 'avenidas') return 'Modo Avenidas';
+    if (s.juego === 'lugares') return `Lugares típicos (${s.escribir ? 'escritas' : 'opciones'})`;
     if (s.modo === 'dia') {
       return `Mapa del día · ${new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}`;
     }
@@ -409,6 +509,7 @@ export default function App() {
       zona: sesion.zona,
       juego: sesion.juego,
       areas: sesion.modo === 'personalizada' ? sesion.areasSel : undefined,
+      escribir: sesion.escribir,
     })}`;
     const texto = `🧭 UbicAMBA — ${tituloPartida(sesion)}\n${lineaPuntos}\nTotal: ${total}/${sesion.indices.length * 100}\nJugala vos: ${link}`;
     try {
@@ -439,6 +540,16 @@ export default function App() {
           resultado: ok ? '✔ 100 pts' : `${r.puntos} pts`,
         };
       }
+      if (sesion.juego === 'lugares' && lugares) {
+        const l = lugares[r.idx];
+        const ok = r.puntos === 100;
+        return {
+          etiqueta,
+          titulo: l.n,
+          sub: `${ETIQUETA_CAT[l.cat] ?? l.cat} · ${l.z === 'caba' ? 'CABA' : 'Provincia'}`,
+          resultado: ok ? '✔ 100 pts' : `✘ ${r.eleccion ?? ''} — 0 pts`,
+        };
+      }
       if (sesion.juego === 'avenidas' && avenidas) {
         const av = avenidas[r.idx];
         const ok = r.puntos === 100;
@@ -460,7 +571,7 @@ export default function App() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sesion, datos, avenidas, transporte, red]);
+  }, [sesion, datos, avenidas, transporte, red, lugares]);
 
   // ---------- render ----------
   if (errorCarga) {
@@ -477,6 +588,7 @@ export default function App() {
 
   const areaReveal = ultimo && juego === 'esquinas' ? areaDe(ultimo.idx) : null;
   const avenidaReveal = ultimo && juego === 'avenidas' && avenidas ? avenidas[ultimo.idx] : null;
+  const lugarReveal = ultimo && juego === 'lugares' && lugares && sesion.fase === 'revelada' ? lugares[ultimo.idx] : null;
   const revealTransporte: DesafioTransporte | null =
     ultimo && esTransporte && transporte && sesion.fase === 'revelada' ? transporte.desafios[ultimo.idx] : null;
 
@@ -485,7 +597,10 @@ export default function App() {
       <header className="hud">
         <div className="hud-fila">
           <span className="marca">
-            🧭 UbicAMBA <small className="marca-sub">{esTransporte ? 'A→B' : zona.corto}</small>
+            🧭 UbicAMBA{' '}
+            <small className="marca-sub">
+              {esTransporte ? 'A→B' : juego === 'lugares' ? 'Lugares' : zona.corto}
+            </small>
           </span>
           {sesion.fase === 'terminado' ? (
             <span className="ronda">¡Juego terminado!</span>
@@ -498,10 +613,12 @@ export default function App() {
             desafiosTransporte={transporte?.desafios ?? null}
             onPedirZona={pedirZona}
             onPedirTransporte={pedirTransporte}
+            onPedirLugares={pedirLugares}
             onDia={() => irAlDia(numeroDia(new Date()), 'dia')}
             onEsquinas={jugarEsquinas}
             onAvenidas={jugarAvenidas}
             onTransporte={jugarTransporte}
+            onLugares={jugarLugares}
             onArchivo={(dia) => irAlDia(dia, 'link')}
           />
           <span className="puntaje">Puntaje: {total}</span>
@@ -516,6 +633,8 @@ export default function App() {
               </>
             ) : juego === 'avenidas' ? (
               <>¿Qué avenida es la <strong>marcada en celeste</strong>?</>
+            ) : juego === 'lugares' ? (
+              <>¿Qué lugar es el <strong>marcado en el mapa</strong>?</>
             ) : (
               esquinaActual && (
                 <>
@@ -583,6 +702,42 @@ export default function App() {
             ))}
           </div>
         )}
+        {sesion.fase === 'adivinando' && juego === 'lugares' && !sesion.escribir && (
+          <div className="opciones">
+            {opcionesLug.map((op) => (
+              <button key={op} type="button" className="btn-opcion" onClick={() => manejarLugar(op)}>
+                {op}
+              </button>
+            ))}
+          </div>
+        )}
+        {sesion.fase === 'adivinando' && juego === 'lugares' && sesion.escribir && (
+          <form
+            className="respuesta-escrita"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (escrito.trim()) manejarLugar(escrito.trim());
+            }}
+          >
+            <input
+              type="text"
+              value={escrito}
+              onChange={(e) => setEscrito(e.target.value)}
+              placeholder="Escribí qué lugar es…"
+              aria-label="Nombre del lugar"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+            />
+            <button type="submit" className="btn-primario" disabled={!escrito.trim()}>
+              Responder
+            </button>
+            <button type="button" className="btn-opcion btn-paso" onClick={() => manejarLugar('')}>
+              Paso
+            </button>
+          </form>
+        )}
         {sesion.fase === 'adivinando' && juego === 'armar' && desafioActual && red && (
           <Armado
             red={red}
@@ -645,6 +800,27 @@ export default function App() {
               <strong>{avenidaReveal.nombre}</strong> — recorre{' '}
               {avenidaReveal.barrios.slice(0, 5).join(', ')}
               {avenidaReveal.barrios.length > 5 ? '…' : ''}
+            </div>
+            <div className="ficha-resultado">
+              <strong>{ultimo.puntos} pts</strong>
+              <button type="button" className="btn-primario btn-siguiente" onClick={avanzar}>
+                {sesion.ronda + 1 >= totalRondas ? 'Ver resultado' : 'Siguiente →'}
+              </button>
+            </div>
+          </div>
+        )}
+        {sesion.fase === 'revelada' && ultimo && lugarReveal && (
+          <div className="ficha">
+            <div className="ficha-dato">
+              {ultimo.puntos === 100 ? (
+                '✔ ¡Correcta! '
+              ) : ultimo.eleccion && ultimo.eleccion !== '(paso)' ? (
+                <>✘ Dijiste <em>{ultimo.eleccion}</em>. Era </>
+              ) : (
+                <>✘ Era </>
+              )}
+              <strong>{lugarReveal.n}</strong> — {ETIQUETA_CAT[lugarReveal.cat] ?? lugarReveal.cat},{' '}
+              {lugarReveal.z === 'caba' ? 'CABA' : 'Provincia de Buenos Aires'}
             </div>
             <div className="ficha-resultado">
               <strong>{ultimo.puntos} pts</strong>

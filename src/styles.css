@@ -676,13 +676,53 @@ body {
   min-width: 236px;
 }
 
-/* ---------- opciones del modo Avenidas ---------- */
+/* ---------- opciones del modo Avenidas y Lugares ---------- */
 .opciones {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* modalidad escrita del modo Lugares */
+.respuesta-escrita {
+  display: flex;
+  gap: 8px;
+  max-width: 720px;
+  margin: 0 auto;
+  align-items: stretch;
+}
+
+.respuesta-escrita input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--borde);
+  color: var(--texto);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-family: inherit;
+}
+
+.respuesta-escrita input:focus {
+  outline: none;
+  border-color: var(--acento);
+}
+
+.respuesta-escrita .btn-paso {
+  flex: none;
+  padding: 10px 14px;
+}
+
+@media (max-width: 520px) {
+  .respuesta-escrita {
+    flex-wrap: wrap;
+  }
+  .respuesta-escrita input {
+    flex-basis: 100%;
+  }
 }
 
 .btn-opcion {

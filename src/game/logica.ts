@@ -1,4 +1,4 @@
-import type { Avenida, DesafioTransporte, Esquina, Juego, ZonaId } from './tipos';
+import type { Avenida, DesafioTransporte, Esquina, Juego, Lugar, ZonaId } from './tipos';
 import { esZonaId } from './zonas';
 
 /** Tanda base: las partidas se arman en múltiplos de 5 rondas (5, 10, 15, 20). */
@@ -128,24 +128,71 @@ export function opcionesAvenida(avenidas: Avenida[], idx: number): string[] {
   return mezclar(opciones, rnd);
 }
 
+// ---------- modo Lugares ----------
+/**
+ * 4 opciones (la correcta + 3 señuelos), iguales para todos los que jueguen este índice.
+ * Los señuelos salen primero de la MISMA categoría: si no, la pregunta se contesta sola
+ * ("¿cuál de estas cuatro es una pizzería?").
+ */
+export function opcionesLugar(lugares: Lugar[], idx: number): string[] {
+  const rnd = mulberry32(idx * 6151 + 20260803);
+  const correcta = lugares[idx];
+  const opciones = [correcta.n];
+  const usados = new Set([idx]);
+  const tomar = (pool: number[]) => {
+    let guarda = 0;
+    while (opciones.length < 4 && guarda++ < 400 && pool.some((i) => !usados.has(i))) {
+      const j = pool[Math.floor(rnd() * pool.length)];
+      if (usados.has(j)) continue;
+      usados.add(j);
+      opciones.push(lugares[j].n);
+    }
+  };
+  const indices = lugares.map((_, i) => i);
+  tomar(indices.filter((i) => i !== idx && lugares[i].cat === correcta.cat));
+  tomar(indices.filter((i) => i !== idx));
+  return mezclar(opciones, rnd);
+}
+
+/** Índices al azar filtrando por categoría y zona (listas vacías = sin filtrar). */
+export function indicesLugaresAlAzar(
+  lugares: Lugar[],
+  cats: string[],
+  zonas: string[],
+  cantidad = RONDAS
+): number[] {
+  const pool: number[] = [];
+  lugares.forEach((l, i) => {
+    if (cats.length && !cats.includes(l.cat)) return;
+    if (zonas.length && !zonas.includes(l.z)) return;
+    pool.push(i);
+  });
+  return mezclar(pool).slice(0, cantidad);
+}
+
 // ---------- share por URL ----------
 export interface ParamsPartida {
   zona: ZonaId;
   juego: Juego;
   indices: number[] | null;
   areasParam: number[] | null;
+  /** modo Lugares: se escribe la respuesta en vez de elegirla */
+  escribir: boolean;
 }
 
 /** Devuelve solo el query string ("?z=…&e=…"); el path lo pone quien lo usa (en Pages la app vive bajo un subpath). */
 export function urlCompartir(
   indices: number[],
-  opts: { zona: ZonaId; juego: Juego; areas?: number[] }
+  opts: { zona: ZonaId; juego: Juego; areas?: number[]; escribir?: boolean }
 ): string {
   const p = new URLSearchParams();
   if (opts.zona !== 'caba') p.set('z', opts.zona);
   if (opts.juego === 'avenidas') p.set('j', 'av');
   if (opts.juego === 'transporte') p.set('j', 'tr');
   if (opts.juego === 'armar') p.set('j', 'ar');
+  if (opts.juego === 'lugares') p.set('j', 'lu');
+  // la modalidad viaja en el link: el que lo abre juega el mismo desafío
+  if (opts.juego === 'lugares' && opts.escribir) p.set('m', 'esc');
   p.set('e', indices.map((i) => i + 1).join('-'));
   if (opts.areas?.length) p.set('areas', opts.areas.join('-'));
   return '?' + p.toString();
@@ -157,7 +204,13 @@ export function parseURL(): ParamsPartida {
   const z = p.get('z');
   const zona: ZonaId = esZonaId(z) ? z : 'caba';
   const j = p.get('j');
-  const juego: Juego = j === 'av' ? 'avenidas' : j === 'tr' ? 'transporte' : j === 'ar' ? 'armar' : 'esquinas';
+  const juego: Juego =
+    j === 'av' ? 'avenidas'
+    : j === 'tr' ? 'transporte'
+    : j === 'ar' ? 'armar'
+    : j === 'lu' ? 'lugares'
+    : 'esquinas';
+  const escribir = p.get('m') === 'esc';
 
   let indices: number[] | null = null;
   const e = p.get('e');
@@ -176,7 +229,13 @@ export function parseURL(): ParamsPartida {
     if (ids.length && ids.every((n) => Number.isInteger(n) && n >= 1)) areasParam = ids;
   }
 
-  // avenidas y transporte son juegos de red completa: siempre parten de la vista CABA
+  // avenidas, transporte y lugares son juegos de red completa: parten de la vista CABA
   const juegoFinal: Juego = juego !== 'esquinas' && zona !== 'caba' ? 'esquinas' : juego;
-  return { zona: juego === 'transporte' ? 'caba' : zona, juego: juegoFinal, indices, areasParam };
+  return {
+    zona: juego === 'transporte' || juego === 'lugares' ? 'caba' : zona,
+    juego: juegoFinal,
+    indices,
+    areasParam,
+    escribir,
+  };
 }
