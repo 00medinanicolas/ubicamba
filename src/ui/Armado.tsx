@@ -1,3 +1,4 @@
+import type { ModoTransporte } from '../game/tipos';
 import { useEffect, useState } from 'react';
 import type { DesafioTransporte, RedTransporte } from '../game/tipos';
 import {
@@ -42,7 +43,7 @@ export default function Armado({ red, desafio, onCambio, onLlegada, onRendirse }
   }
 
   const actual = red.estaciones[estado.actual];
-  const icono = (r: 'subte' | 'tren') => (r === 'subte' ? '🚇' : '🚆');
+  const icono = (r: ModoTransporte) => (r === 'subte' ? '🚇' : r === 'tren' ? '🚆' : '🚌');
 
   if (eligiendo) {
     const linea = red.lineas[eligiendo.li];

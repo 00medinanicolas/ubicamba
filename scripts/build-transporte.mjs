@@ -19,7 +19,7 @@ import { PARTIDOS_POR_ZONA, normalizarNombre } from './zonas-amba.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GTFS = join(ROOT, 'data-src', 'gtfs');
-const VERSION = 'subte-tren-v1';
+const VERSION = 'subte-tren-colectivo-v1';
 const SEED = 20260722;
 
 const CUPO_BUCKET = 8; // desafíos por (combinación de zonas × nivel de combinaciones)
@@ -278,6 +278,36 @@ function agregarEstacion(id, nombre, lat, lng, red) {
         espera: Math.min(18, Math.max(3, hw / 2)),
       });
     }
+  }
+}
+
+// ---------- COLECTIVOS ----------
+// El dataset lo arma scripts/build-colectivos.mjs a partir del GTFS del AMBA:
+// solo las lineas clasicas, raleadas y fusionadas. Aca entran por las mismas
+// puertas que subte y tren, asi que el grafo, las caminatas y los desafios los
+// toman sin tocar nada mas.
+{
+  const ruta = join(ROOT, 'public', 'data', 'colectivos-v1.json');
+  if (existsSync(ruta)) {
+    const col = JSON.parse(readFileSync(ruta, 'utf8'));
+    col.paradas.forEach((s, i) => agregarEstacion('c' + i, s.n, s.lat, s.lng, 'colectivo'));
+    for (const l of col.lineas) {
+      lineas.push({
+        id: `col|${l.nombre}`,
+        red: 'colectivo',
+        // Agrupadas por NUMERO de linea: al buscar alternativas, dos ramales del
+        // 60 no son dos opciones distintas, son el mismo colectivo.
+        ruta: `col-${l.linea}`,
+        nombre: l.linea,
+        color: l.color,
+        secuencia: l.sec.map((k) => 'c' + k),
+        hops: l.hops,
+        espera: l.espera,
+      });
+    }
+    console.log(`Colectivos: ${col.paradas.length} paradas · ${col.lineas.length} recorridos`);
+  } else {
+    console.log('Sin colectivos-v1.json: la red queda solo con subte y tren.');
   }
 }
 
@@ -571,9 +601,26 @@ const idxDe = new Map(listaEstaciones.map((e, i) => [e.id, i]));
 }
 
 // ---------- generación por cuotas (zonas × combinaciones) ----------
+// Origenes y destinos: se separan las estaciones (subte y tren) de las paradas de
+// colectivo. Si se sortea de una bolsa sola, las 1.248 paradas aplastan a las 356
+// estaciones y practicamente TODO viaje termina usando un colectivo: al destildar
+// esa red en el panel casi no quedan viajes para jugar. Se sortea entonces con
+// peso, para que el juego sin colectivos siga siendo un juego.
+const PESO_PARADA = 0.3;
 const porZona = { caba: [], norte: [], oeste: [], sur: [] };
-for (const e of listaEstaciones) if (e.zona) porZona[e.zona].push(e);
-console.log(`Estaciones elegibles: ${Object.values(porZona).reduce((a, l) => a + l.length, 0)}`);
+const paradasZona = { caba: [], norte: [], oeste: [], sur: [] };
+for (const e of listaEstaciones) {
+  if (!e.zona) continue;
+  (e.red === 'colectivo' ? paradasZona : porZona)[e.zona].push(e);
+}
+/** Un extremo de viaje: estacion casi siempre, parada de colectivo a veces. */
+function extremo(zona) {
+  const est = porZona[zona], par = paradasZona[zona];
+  const usarParada = par.length && (!est.length || rnd() < PESO_PARADA);
+  const lista = usarParada ? par : est;
+  return lista.length ? lista[Math.floor(rnd() * lista.length)] : null;
+}
+console.log(`Elegibles: ${Object.values(porZona).reduce((a, l) => a + l.length, 0)} estaciones · ${Object.values(paradasZona).reduce((a, l) => a + l.length, 0)} paradas`);
 
 // pasadas dirigidas: primero dentro de cada zona (lo más difícil de encontrar al azar), después entre zonas
 const PASADAS = [
@@ -588,13 +635,12 @@ const buckets = new Map();
 let intentos = 0;
 
 for (const [zA, zB, presupuesto] of PASADAS) {
-  const listaA = porZona[zA], listaB = porZona[zB];
-  if (!listaA.length || !listaB.length) continue;
+  if (!porZona[zA].length && !paradasZona[zA].length) continue;
+  if (!porZona[zB].length && !paradasZona[zB].length) continue;
   for (let n = 0; n < presupuesto; n++) {
     intentos++;
-    const a = listaA[Math.floor(rnd() * listaA.length)];
-    const b = listaB[Math.floor(rnd() * listaB.length)];
-    if (a.id === b.id || metros(a, b) < 3000) continue;
+    const a = extremo(zA), b = extremo(zB);
+    if (!a || !b || a.id === b.id || metros(a, b) < 3000) continue;
     if ((porOrigen.get(a.id) ?? 0) >= TOPE_POR_ORIGEN) continue;
 
     const gen = generarOpciones(a.id, b.id);
@@ -611,8 +657,11 @@ for (const [zA, zB, presupuesto] of PASADAS) {
     const minOpciones = gen.combinaciones === 0 ? 2 : 3;
     const soloArmar = gen.opciones.length < minOpciones;
 
+    // modos que usa el viaje optimo: el panel filtra con esto, y ademas entra en
+    // la clave del cupo para que las combinaciones con colectivo no se lleven todo
+    const modos = [...new Set(opt.legs.filter((l) => l.li >= 0).map((l) => lineas[l.li].red))].sort();
     const nivel = Math.min(gen.combinaciones, 2);
-    const clave = `${zonas.join('+')}|${nivel}|${soloArmar ? 'b' : 'ab'}`;
+    const clave = `${zonas.join('+')}|${nivel}|${soloArmar ? 'b' : 'ab'}|${modos.join('+')}`;
     if ((buckets.get(clave) ?? 0) >= CUPO_BUCKET) continue;
     buckets.set(clave, (buckets.get(clave) ?? 0) + 1);
     porOrigen.set(a.id, (porOrigen.get(a.id) ?? 0) + 1);
@@ -622,6 +671,7 @@ for (const [zA, zB, presupuesto] of PASADAS) {
       d: idxDe.get(b.id),
       z: zonas,
       c: gen.combinaciones,
+      m: modos,
       ...(soloArmar ? { soloArmar: 1 } : {}),
       opciones: gen.opciones,
     });

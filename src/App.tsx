@@ -12,6 +12,7 @@ import type {
   Resultado,
   Sesion,
   ZonaId,
+  ModoTransporte,
 } from './game/tipos';
 import {
   RONDAS,
@@ -84,7 +85,7 @@ function aplicarURL(s: Sesion) {
   window.history.replaceState(null, '', url);
 }
 
-const iconoRed = (r: 'subte' | 'tren') => (r === 'subte' ? '🚇' : '🚆');
+const iconoRed = (r: ModoTransporte) => (r === 'subte' ? '🚇' : r === 'tren' ? '🚆' : '🚌');
 
 export default function App() {
   const [datos, setDatos] = useState<DatosZona | null>(null);

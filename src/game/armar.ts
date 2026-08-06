@@ -4,14 +4,14 @@
 // caminar = minutos de la conexión. Así su viaje armado es comparable 1:1
 // con el óptimo precomputado del desafío.
 
-import type { RedTransporte } from './tipos';
+import type { ModoTransporte, RedTransporte } from './tipos';
 
 export interface LegArmado {
   tipo: 'linea' | 'caminar';
   li?: number;
   nombre: string;
   color: string;
-  red?: 'subte' | 'tren';
+  red?: ModoTransporte;
   desdeIdx: number;
   hastaIdx: number;
   min: number;
@@ -34,14 +34,14 @@ export interface OpcionLinea {
   pos: number;
   nombre: string;
   color: string;
-  red: 'subte' | 'tren';
+  red: ModoTransporte;
   hacia: string;
 }
 
 export interface OpcionCaminata {
   hasta: number;
   nombre: string;
-  red: 'subte' | 'tren';
+  red: ModoTransporte;
   min: number;
 }
 

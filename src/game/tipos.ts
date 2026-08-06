@@ -22,9 +22,12 @@ export interface DatosLugares {
   lugares: Lugar[];
 }
 
+/** Las tres redes que entran al grafo de «Cómo llegar». */
+export type ModoTransporte = 'subte' | 'tren' | 'colectivo';
+
 export interface RedEstacion {
   n: string;
-  r: 'subte' | 'tren';
+  r: ModoTransporte;
   z: ZonaTransporte | null;
   lat: number;
   lng: number;
@@ -33,7 +36,7 @@ export interface RedEstacion {
 export interface RedLinea {
   nombre: string;
   color: string;
-  red: 'subte' | 'tren';
+  red: ModoTransporte;
   espera: number;
   /** índices de estación en orden de recorrido */
   sec: number[];
@@ -74,6 +77,8 @@ export interface DesafioTransporte {
   z: ZonaTransporte[];
   /** combinaciones (transbordos) del viaje óptimo */
   c: number;
+  /** redes que usa el viaje óptimo; el panel filtra con esto */
+  m?: ModoTransporte[];
   /** sin alternativas suficientes: solo sirve para "armá tu viaje" */
   soloArmar?: 1;
   opciones: OpcionTransporte[];

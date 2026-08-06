@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { DesafioTransporte, ZonaTransporte } from '../game/tipos';
+import type { DesafioTransporte, ModoTransporte, ZonaTransporte } from '../game/tipos';
 import { TANDAS } from '../game/logica';
 import { Casilla, Panel, Seccion, Segmentado, Tarjeta } from './Panel';
 
@@ -9,6 +9,7 @@ export type NivelComb = 'todas' | 'directo' | 'una' | 'dosmas';
 export interface ConfigTransporte {
   mecanica: Mecanica;
   zonas: ZonaTransporte[];
+  redes: ModoTransporte[];
   comb: NivelComb;
   rondas: number;
 }
@@ -20,6 +21,12 @@ const ZONAS_UI: { id: ZonaTransporte; etiqueta: string; detalle: string }[] = [
   { id: 'sur', etiqueta: 'Zona Sur', detalle: 'Roca' },
 ];
 
+const REDES_UI: { id: ModoTransporte; etiqueta: string; detalle: string }[] = [
+  { id: 'subte', etiqueta: '🚇 Subte', detalle: 'las seis líneas y el Premetro' },
+  { id: 'tren', etiqueta: '🚆 Tren', detalle: 'Mitre, San Martín, Sarmiento, Roca, Belgrano' },
+  { id: 'colectivo', etiqueta: '🚌 Colectivo', detalle: '29 líneas clásicas' },
+];
+
 const COMB: { valor: NivelComb; etiqueta: string }[] = [
   { valor: 'todas', etiqueta: 'Cualquiera' },
   { valor: 'directo', etiqueta: 'Directo' },
@@ -29,10 +36,14 @@ const COMB: { valor: NivelComb; etiqueta: string }[] = [
 
 export function filtrarDesafios(desafios: DesafioTransporte[], config: ConfigTransporte): number[] {
   const zonas = new Set(config.zonas);
+  const redes = new Set(config.redes);
   const out: number[] = [];
   desafios.forEach((d, i) => {
     if (config.mecanica === 'elegir' && d.soloArmar) return;
     if (!d.z.every((z) => zonas.has(z))) return;
+    // Un viaje entra sólo si TODAS las redes que usa están habilitadas: si no,
+    // se mostraría un itinerario óptimo que el jugador dijo no querer.
+    if (d.m && !d.m.every((m) => redes.has(m))) return;
     if (config.comb === 'directo' && d.c !== 0) return;
     if (config.comb === 'una' && d.c !== 1) return;
     if (config.comb === 'dosmas' && d.c < 2) return;
@@ -51,11 +62,15 @@ interface Props {
 export default function PanelTransporte({ desafios, inicial, onJugar, onCerrar }: Props) {
   const [mecanica, setMecanica] = useState<Mecanica>(inicial?.mecanica ?? 'elegir');
   const [zonas, setZonas] = useState<ZonaTransporte[]>(inicial?.zonas ?? ['caba', 'norte', 'oeste', 'sur']);
+  const [redes, setRedes] = useState<ModoTransporte[]>(inicial?.redes ?? ['subte', 'tren', 'colectivo']);
   const [comb, setComb] = useState<NivelComb>(inicial?.comb ?? 'todas');
   const [rondas, setRondas] = useState<number>(inicial?.rondas ?? 5);
 
-  const config: ConfigTransporte = { mecanica, zonas, comb, rondas };
-  const disponibles = useMemo(() => filtrarDesafios(desafios, config), [desafios, mecanica, zonas, comb]);
+  const config: ConfigTransporte = { mecanica, zonas, redes, comb, rondas };
+  const disponibles = useMemo(() => filtrarDesafios(desafios, config), [desafios, mecanica, zonas, redes, comb]);
+
+  const alternar = <T,>(v: T, lista: T[], set: (l: T[]) => void) =>
+    set(lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
 
   const alternarZona = (z: ZonaTransporte) =>
     setZonas((prev) => (prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z]));
@@ -119,6 +134,20 @@ export default function PanelTransporte({ desafios, inicial, onJugar, onCerrar }
               detalle={z.detalle}
               activo={zonas.includes(z.id)}
               onClick={() => alternarZona(z.id)}
+            />
+          ))}
+        </div>
+      </Seccion>
+
+      <Seccion titulo="Redes" hint="con qué se puede viajar">
+        <div className="grilla-2">
+          {REDES_UI.map((r) => (
+            <Casilla
+              key={r.id}
+              etiqueta={r.etiqueta}
+              detalle={r.detalle}
+              activo={redes.includes(r.id)}
+              onClick={() => alternar(r.id, redes, setRedes)}
             />
           ))}
         </div>
