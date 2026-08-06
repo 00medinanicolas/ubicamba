@@ -85,6 +85,28 @@ body {
   position: relative;
 }
 
+/* El disparador de los modos de juego: es la accion principal de la barra, asi
+   que lleva el peso del boton primario y no el gris de los secundarios. */
+.jugar-btn {
+  background: var(--acento);
+  color: #062033;
+  font-weight: 800;
+  border: none;
+  border-radius: 9px;
+  padding: 6px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+}
+
+.jugar-btn:hover {
+  background: var(--acento-2);
+}
+
+.jugar-btn[aria-expanded='true'] {
+  background: var(--acento-2);
+}
+
 .menu-btn,
 .btn-secundario {
   background: var(--panel-2);
@@ -543,6 +565,10 @@ body {
   align-items: flex-start;
   text-align: left;
   background: var(--panel-2);
+  /* Es un <button>: sin esto hereda el negro del navegador y el título de la
+     tarjeta sale oscuro sobre fondo oscuro (el <small> sí define color, por eso
+     el detalle se veía bien y el título no). */
+  color: var(--texto);
   border: 1px solid var(--borde);
   border-radius: 12px;
   padding: 12px;

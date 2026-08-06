@@ -74,8 +74,8 @@ export default function Menu({
 
   return (
     <div className="menu-wrap" ref={wrapRef}>
-      <button type="button" className="menu-btn" onClick={() => setAbiertoMenu((v) => !v)} aria-expanded={abiertoMenu}>
-        Menú ▾
+      <button type="button" className="jugar-btn" onClick={() => setAbiertoMenu((v) => !v)} aria-expanded={abiertoMenu}>
+        Jugar ▾
       </button>
 
       {abiertoMenu && (
