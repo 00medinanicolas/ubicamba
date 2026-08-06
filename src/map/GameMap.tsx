@@ -32,6 +32,9 @@ interface Props {
   trazadoMalo: GeoJSON.FeatureCollection | null;
   /** marcadores A/B del modo transporte; al setearse la vista se amplía al AMBA */
   marcadoresAB: MarcadorAB[] | null;
+  /** modo Comunas y localidades: la vista se queda en la zona entera en vez de
+      acercarse a la geometría destacada, que ahí es justamente lo que hay que ubicar. */
+  encuadrarZona?: boolean;
 }
 
 // caché de overlays descargados (por URL, vive toda la sesión)
@@ -95,6 +98,7 @@ export default function GameMap({
   destacado,
   trazadoMalo,
   marcadoresAB,
+  encuadrarZona = false,
 }: Props) {
   const contRef = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<MapaML | null>(null);
@@ -175,6 +179,14 @@ export default function GameMap({
       }
       if (!mapa.getSource('destacado')) {
         mapa.addSource('destacado', { type: 'geojson', data: destacadoRef.current ?? FC_VACIA });
+        // Relleno para el modo Comunas y localidades. Sobre una LineString (avenidas)
+        // MapLibre no dibuja nada, asi que la capa no molesta a los demas modos.
+        mapa.addLayer({
+          id: 'destacado-relleno',
+          type: 'fill',
+          source: 'destacado',
+          paint: { 'fill-color': '#4cc2ff', 'fill-opacity': 0.18 },
+        });
         mapa.addLayer({
           id: 'destacado-halo',
           type: 'line',
@@ -327,12 +339,21 @@ export default function GameMap({
     const mapa = mapaRef.current;
     if (!mapa || !listoRef.current) return;
     (mapa.getSource('destacado') as GeoJSONSource | undefined)?.setData(destacado ?? FC_VACIA);
-    if (destacado && !marcadoresAB) {
+    if (destacado && !marcadoresAB && !encuadrarZona) {
       const bbox = bboxDeFC(destacado);
       if (bbox) mapa.fitBounds(bbox, { padding: 60, duration: 700, maxZoom: 14.5 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destacado, listo]);
+  }, [destacado, listo, encuadrarZona]);
+
+  // Modo Comunas y localidades: la vista vuelve a la zona entera, que es el marco
+  // de referencia para reconocer el contorno.
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listoRef.current || !encuadrarZona) return;
+    mapa.fitBounds(zona.encuadre, { padding: 24, duration: 700 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encuadrarZona, zona.id, listo]);
 
   // trazado de la opción elegida (cuando no fue la óptima)
   useEffect(() => {

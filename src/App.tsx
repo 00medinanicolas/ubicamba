@@ -25,13 +25,16 @@ import {
   nombreEsquina,
   numeroDia,
   opcionesAvenida,
+  opcionesArea,
   opcionesLugar,
+  indicesAreasAlAzar,
   parseURL,
   puntosPorDistancia,
   urlCompartir,
 } from './game/logica';
 import { fcDeEst, resumenLegs, type LegArmado } from './game/armar';
-import { cargarAvenidas, cargarLugares, cargarRed, cargarTransporte, cargarZona } from './game/datos';
+import { cargarAreasGeo, cargarAvenidas, cargarLugares, cargarRed, cargarTransporte, cargarZona } from './game/datos';
+import type { AreaGeo, ColeccionArea } from './game/datos';
 import { aceptaRespuesta } from './game/respuestas';
 import { cargarSesion, guardarSesion, mismosIndices } from './game/sesion';
 import { ZONAS } from './game/zonas';
@@ -43,6 +46,7 @@ import PanelFinal, { formatoDistancia, type FilaFinal } from './ui/PanelFinal';
 import type { ConfigEsquinas } from './ui/PanelEsquinas';
 import type { ConfigTransporte } from './ui/PanelTransporte';
 import type { ConfigLugares } from './ui/PanelLugares';
+import type { ConfigAreas } from './ui/PanelAreas';
 import { colorComuna } from './ui/colores';
 
 function sesionBase(
@@ -87,6 +91,8 @@ export default function App() {
   const [avenidas, setAvenidas] = useState<Avenida[] | null>(null);
   const [transporte, setTransporte] = useState<DatosTransporte | null>(null);
   const [lugares, setLugares] = useState<Lugar[] | null>(null);
+  const [areasGeo, setAreasGeo] = useState<AreaGeo[] | null>(null);
+  const [coleccion, setColeccion] = useState<ColeccionArea>('comunas');
   const [escrito, setEscrito] = useState('');
   const [red, setRed] = useState<RedTransporte | null>(null);
   const [armadoLegs, setArmadoLegs] = useState<LegArmado[]>([]);
@@ -234,6 +240,24 @@ export default function App() {
     );
   }
 
+  /** Modo Comunas y localidades: cada coleccion de public/geo/ vive en su zona. */
+  const zonaDeColeccion = (c: ColeccionArea): ZonaId =>
+    c === 'partidos-norte' ? 'norte' : c === 'partidos-oeste' ? 'oeste' : c === 'partidos-sur' ? 'sur' : 'caba';
+
+  async function jugarAreas(config: ConfigAreas) {
+    // Con los limites dibujados encima, la respuesta estaria escrita en el mapa.
+    setVerComunas(false);
+    setVerAreas(false);
+    const zona = zonaDeColeccion(config.coleccion);
+    const [d, ar] = await Promise.all([cargarZona(zona), cargarAreasGeo(config.coleccion)]);
+    setAreasGeo(ar);
+    setColeccion(config.coleccion);
+    empezar(
+      sesionBase(zona, 'areas', indicesAreasAlAzar(ar.length, config.rondas), 'link', [], config.modalidad === 'escribir'),
+      d
+    );
+  }
+
   async function irAlDia(dia: number, modo: Modo) {
     const d = await cargarZona('caba');
     empezar(sesionBase('caba', 'esquinas', indicesDelDia(dia, d.esquinas.length), modo, []), d);
@@ -293,6 +317,17 @@ export default function App() {
       );
       return;
     }
+    if (sesion.juego === 'areas' && areasGeo) {
+      empezar(
+        sesionBase(
+          zonaDeColeccion(coleccion), 'areas',
+          indicesAreasAlAzar(areasGeo.length, sesion.indices.length),
+          'link', [], sesion.escribir
+        ),
+        datos
+      );
+      return;
+    }
     if (sesion.juego === 'avenidas' && avenidas) {
       empezar(sesionBase('caba', 'avenidas', indicesAlAzar(avenidas.length, sesion.indices.length), 'link', []), datos);
       return;
@@ -337,6 +372,23 @@ export default function App() {
     const correcta = sesion.escribir
       ? aceptaRespuesta(texto, l.n, l.a ?? [])
       : texto === l.n;
+    const r: Resultado = {
+      idx,
+      guess: null,
+      eleccion: texto || '(paso)',
+      distancia: 0,
+      puntos: correcta ? 100 : 0,
+    };
+    setEscrito('');
+    setSesion((s) => (s ? { ...s, fase: 'revelada', resultados: [...s.resultados, r] } : s));
+  }
+
+  /** Modo Comunas y localidades. `texto` vacio = se rindio. */
+  function manejarArea(texto: string) {
+    if (!sesion || !areasGeo || sesion.fase !== 'adivinando' || sesion.juego !== 'areas') return;
+    const idx = sesion.indices[sesion.ronda];
+    const a = areasGeo[idx];
+    const correcta = sesion.escribir ? aceptaRespuesta(texto, a.nombre) : texto === a.nombre;
     const r: Resultado = {
       idx,
       guess: null,
@@ -407,6 +459,20 @@ export default function App() {
 
   const resumenOpcion = (op: OpcionTransporte) => op.legs.filter((l) => l.li >= 0).map((l) => infoLeg(l).nombre).join(' → ');
 
+  const areaActual =
+    juego === 'areas' && sesion && areasGeo && sesion.fase !== 'terminado'
+      ? areasGeo[sesion.indices[sesion.ronda]]
+      : null;
+
+  const opcionesAr = useMemo(
+    () =>
+      juego === 'areas' && sesion && areasGeo && !sesion.escribir && sesion.fase !== 'terminado'
+        ? opcionesArea(areasGeo.map((a) => a.nombre), sesion.indices[sesion.ronda])
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [juego, sesion?.ronda, sesion?.indices, sesion?.escribir, areasGeo]
+  );
+
   const opciones = useMemo(
     () =>
       juego === 'avenidas' && sesion && avenidas && sesion.fase !== 'terminado'
@@ -428,6 +494,10 @@ export default function App() {
   const ultimo = sesion?.resultados[sesion.resultados.length - 1];
 
   const destacado = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    // El contorno se sigue mostrando en la revelacion: es la respuesta.
+    if (juego === 'areas' && areaActual) {
+      return { type: 'FeatureCollection', features: [areaActual.feature] };
+    }
     if (avenidaActual && sesion?.fase !== 'terminado') {
       return {
         type: 'FeatureCollection',
@@ -446,7 +516,7 @@ export default function App() {
     }
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [avenidaActual, desafioActual, sesion?.fase, juego, red, armadoLegs]);
+  }, [avenidaActual, desafioActual, sesion?.fase, juego, red, armadoLegs, areaActual]);
 
   const trazadoMalo = useMemo<GeoJSON.FeatureCollection | null>(() => {
     if (!desafioActual || !red || sesion?.fase !== 'revelada' || !ultimo) return null;
@@ -491,6 +561,7 @@ export default function App() {
     if (s.juego === 'armar') return 'Armá tu viaje (A→B)';
     if (s.juego === 'avenidas') return 'Modo Avenidas';
     if (s.juego === 'lugares') return `Lugares típicos (${s.escribir ? 'escritas' : 'opciones'})`;
+    if (s.juego === 'areas') return `Comunas y localidades (${s.escribir ? 'escritas' : 'opciones'})`;
     if (s.modo === 'dia') {
       return `Mapa del día · ${new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}`;
     }
@@ -589,6 +660,7 @@ export default function App() {
   const areaReveal = ultimo && juego === 'esquinas' ? areaDe(ultimo.idx) : null;
   const avenidaReveal = ultimo && juego === 'avenidas' && avenidas ? avenidas[ultimo.idx] : null;
   const lugarReveal = ultimo && juego === 'lugares' && lugares && sesion.fase === 'revelada' ? lugares[ultimo.idx] : null;
+  const areaReveal2 = ultimo && juego === 'areas' && areasGeo && sesion.fase === 'revelada' ? areasGeo[ultimo.idx] : null;
   const revealTransporte: DesafioTransporte | null =
     ultimo && esTransporte && transporte && sesion.fase === 'revelada' ? transporte.desafios[ultimo.idx] : null;
 
@@ -619,6 +691,7 @@ export default function App() {
             onAvenidas={jugarAvenidas}
             onTransporte={jugarTransporte}
             onLugares={jugarLugares}
+          onAreas={jugarAreas}
             onArchivo={(dia) => irAlDia(dia, 'link')}
           />
           <span className="puntaje">Puntaje: {total}</span>
@@ -659,9 +732,10 @@ export default function App() {
           destacado={destacado}
           trazadoMalo={trazadoMalo}
           marcadoresAB={marcadoresAB}
+          encuadrarZona={juego === 'areas'}
         />
         <div className="controles-mapa">
-          {zona.overlays.some((o) => o.grupo === 'comunas') && (
+          {zona.overlays.some((o) => o.grupo === 'comunas') && juego !== 'areas' && (
             <button
               type="button"
               className={verComunas ? 'activo' : ''}
@@ -671,14 +745,16 @@ export default function App() {
               Comunas
             </button>
           )}
-          <button
-            type="button"
-            className={verAreas ? 'activo' : ''}
-            onClick={() => setVerAreas((v) => !v)}
-            title={`Mostrar límites de ${zona.etiquetaAreas.toLowerCase()}`}
-          >
-            {zona.etiquetaAreas}
-          </button>
+          {juego !== 'areas' && (
+            <button
+              type="button"
+              className={verAreas ? 'activo' : ''}
+              onClick={() => setVerAreas((v) => !v)}
+              title={`Mostrar límites de ${zona.etiquetaAreas.toLowerCase()}`}
+            >
+              {zona.etiquetaAreas}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setBasemap((b) => (b === 'plano' ? 'satelite' : 'plano'))}
@@ -693,6 +769,9 @@ export default function App() {
         {sesion.fase === 'adivinando' && juego === 'esquinas' && (
           <span className="pista">Tocá el mapa donde creés que está la esquina</span>
         )}
+        {sesion.fase === 'adivinando' && juego === 'areas' && (
+          <span className="pista">¿Qué zona es la que está iluminada?</span>
+        )}
         {sesion.fase === 'adivinando' && juego === 'avenidas' && (
           <div className="opciones">
             {opciones.map((op) => (
@@ -701,6 +780,42 @@ export default function App() {
               </button>
             ))}
           </div>
+        )}
+        {sesion.fase === 'adivinando' && juego === 'areas' && !sesion.escribir && (
+          <div className="opciones">
+            {opcionesAr.map((op) => (
+              <button key={op} type="button" className="btn-opcion" onClick={() => manejarArea(op)}>
+                {op}
+              </button>
+            ))}
+          </div>
+        )}
+        {sesion.fase === 'adivinando' && juego === 'areas' && sesion.escribir && (
+          <form
+            className="respuesta-escrita"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (escrito.trim()) manejarArea(escrito.trim());
+            }}
+          >
+            <input
+              type="text"
+              value={escrito}
+              onChange={(e) => setEscrito(e.target.value)}
+              placeholder="Escribí qué zona es…"
+              aria-label="Nombre de la comuna o localidad"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+            />
+            <button type="submit" className="btn-primario" disabled={!escrito.trim()}>
+              Responder
+            </button>
+            <button type="button" className="btn-opcion btn-paso" onClick={() => manejarArea('')}>
+              Paso
+            </button>
+          </form>
         )}
         {sesion.fase === 'adivinando' && juego === 'lugares' && !sesion.escribir && (
           <div className="opciones">
@@ -800,6 +915,26 @@ export default function App() {
               <strong>{avenidaReveal.nombre}</strong> — recorre{' '}
               {avenidaReveal.barrios.slice(0, 5).join(', ')}
               {avenidaReveal.barrios.length > 5 ? '…' : ''}
+            </div>
+            <div className="ficha-resultado">
+              <strong>{ultimo.puntos} pts</strong>
+              <button type="button" className="btn-primario btn-siguiente" onClick={avanzar}>
+                {sesion.ronda + 1 >= totalRondas ? 'Ver resultado' : 'Siguiente →'}
+              </button>
+            </div>
+          </div>
+        )}
+        {sesion.fase === 'revelada' && ultimo && areaReveal2 && (
+          <div className="ficha">
+            <div className="ficha-dato">
+              {ultimo.puntos === 100 ? (
+                '✔ ¡Correcta! '
+              ) : ultimo.eleccion && ultimo.eleccion !== '(paso)' ? (
+                <>✘ Dijiste <em>{ultimo.eleccion}</em>. Era </>
+              ) : (
+                <>✘ Era </>
+              )}
+              <strong>{areaReveal2.nombre}</strong>
             </div>
             <div className="ficha-resultado">
               <strong>{ultimo.puntos} pts</strong>

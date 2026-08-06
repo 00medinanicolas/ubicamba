@@ -6,11 +6,12 @@ import Archivo from './Archivo';
 import PanelEsquinas, { type ConfigEsquinas } from './PanelEsquinas';
 import PanelTransporte, { type ConfigTransporte } from './PanelTransporte';
 import PanelLugares, { type ConfigLugares } from './PanelLugares';
+import PanelAreas, { type ConfigAreas } from './PanelAreas';
 import { Panel, Seccion, Segmentado } from './Panel';
 
 export { colorComuna } from './colores';
 
-type Abierto = null | 'esquinas' | 'transporte' | 'avenidas' | 'lugares' | 'archivo';
+type Abierto = null | 'esquinas' | 'transporte' | 'avenidas' | 'lugares' | 'areas' | 'archivo';
 
 interface Props {
   zona: ZonaDef;
@@ -24,6 +25,7 @@ interface Props {
   onAvenidas: (rondas: number) => void;
   onTransporte: (config: ConfigTransporte, indices: number[]) => void;
   onLugares: (config: ConfigLugares, indices: number[]) => void;
+  onAreas: (config: ConfigAreas) => void;
   onArchivo: (dia: number) => void;
 }
 
@@ -39,6 +41,7 @@ export default function Menu({
   onAvenidas,
   onTransporte,
   onLugares,
+  onAreas,
   onArchivo,
 }: Props) {
   const [abiertoMenu, setAbiertoMenu] = useState(false);
@@ -99,6 +102,10 @@ export default function Menu({
           <button type="button" onClick={item(() => void abrirLugares())}>
             <span>Lugares típicos</span>
             <small>identificá el lugar marcado</small>
+          </button>
+          <button type="button" onClick={item(() => setPanel('areas'))}>
+            <span>Comunas y localidades</span>
+            <small>nombrá el contorno iluminado</small>
           </button>
           <button type="button" onClick={item(() => setPanel('archivo'))}>
             <span>Archivo</span>
@@ -190,6 +197,16 @@ export default function Menu({
             />
           </Seccion>
         </Panel>
+      )}
+
+      {panel === 'areas' && (
+        <PanelAreas
+          onCerrar={() => setPanel(null)}
+          onJugar={(c) => {
+            setPanel(null);
+            onAreas(c);
+          }}
+        />
       )}
 
       {panel === 'archivo' && (

@@ -1,6 +1,6 @@
 export type ZonaId = 'caba' | 'norte' | 'oeste' | 'sur';
 
-export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar' | 'lugares';
+export type Juego = 'esquinas' | 'avenidas' | 'transporte' | 'armar' | 'lugares' | 'areas';
 
 export type CategoriaLugar =
   | 'monumento' | 'estado' | 'biblioteca' | 'cultura' | 'museo' | 'comida' | 'estadio';

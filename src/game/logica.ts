@@ -154,6 +154,32 @@ export function opcionesLugar(lugares: Lugar[], idx: number): string[] {
   return mezclar(opciones, rnd);
 }
 
+// ---------- modo Comunas y Localidades ----------
+/** 4 opciones (la correcta + 3 senuelos) tomadas de la misma coleccion. */
+export function opcionesArea(nombres: string[], idx: number): string[] {
+  const rnd = mulberry32(idx * 7919 + 20260806);
+  const opciones = [nombres[idx]];
+  const usados = new Set([idx]);
+  let guarda = 0;
+  while (opciones.length < 4 && guarda++ < 400 && usados.size < nombres.length) {
+    const j = Math.floor(rnd() * nombres.length);
+    if (usados.has(j)) continue;
+    usados.add(j);
+    opciones.push(nombres[j]);
+  }
+  return mezclar(opciones, rnd);
+}
+
+/** Indices al azar de la coleccion de areas, sin repetir. */
+export function indicesAreasAlAzar(total: number, cuantas: number): number[] {
+  const todos = Array.from({ length: total }, (_, i) => i);
+  for (let i = todos.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [todos[i], todos[j]] = [todos[j], todos[i]];
+  }
+  return todos.slice(0, Math.min(cuantas, total));
+}
+
 /** Índices al azar filtrando por categoría y zona (listas vacías = sin filtrar). */
 export function indicesLugaresAlAzar(
   lugares: Lugar[],
